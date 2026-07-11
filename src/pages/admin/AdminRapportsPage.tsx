@@ -213,7 +213,7 @@ export function AdminRapportsPage() {
                     <Cell key={i} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(val: number) => [`${val} tontines`, '']} />
+                <Tooltip formatter={(val: any) => val != null ? [`${val} tontines`, ''] : ['', '']} />
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-3 flex-shrink-0">

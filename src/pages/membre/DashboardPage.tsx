@@ -1,88 +1,37 @@
-import { Link } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   RiGroupLine, RiMoneyDollarCircleLine, RiAddCircleLine,
-  RiArrowRightLine, RiShieldCheckLine, RiBarChartLine,
-  RiCalendarCheckLine, RiAlertLine, RiCheckDoubleLine,
-  RiTimeLine, RiWalletLine, RiTrophyLine, RiStarLine,
-  RiFileChartLine, RiUserLine, RiStackLine,
+  RiArrowRightLine, RiCheckDoubleLine, RiTimeLine,
+  RiAlertLine, RiCalendarLine, RiWalletLine, RiTrophyLine,
+  RiStarLine, RiStackLine, RiUserLine, RiShieldCheckLine,
+  RiBarChartLine, RiLoader4Line, RiFileChartLine,
 } from 'react-icons/ri';
-import { useAuth } from '../../contexts/AuthContext';
-import { formatMontant, formatDate, getStatutColor, getStatutLabel } from '../../lib/utils';
-import type { UserRole } from '../../types';
+import { useAuth }              from '../../contexts/AuthContext';
+import { useTontines, useAllTontines, useStatsTontine } from '../../hooks/useTontines';
+import { useMesCotisations }    from '../../hooks/useCotisations';
+import { useTontineScore }      from '../../hooks/useMembres';
+import { useStatsAdmin }        from '../../hooks/useAdmin';
+import { useNotifications }     from '../../hooks/useNotifications';
+import { formatMontant, formatDate, getStatutColor, getStatutLabel, cn } from '../../lib/utils';
+import type { UserRole }        from '../../types';
 
-// ═══════════════════════════════════════════════
-//  MOCK DATA (à remplacer par hooks Supabase)
-// ═══════════════════════════════════════════════
-
-const MOCK_STATS_ADMIN = {
-  total_tontines:       24,
-  tontines_actives:     18,
-  total_utilisateurs:   137,
-  total_collecte:       14_750_000,
-  taux_participation:   91,
-  nouvelles_inscriptions: 12,
-};
-
-const MOCK_STATS_ORGA = {
-  mes_tontines:         3,
-  membres_total:        28,
-  total_collecte:       3_250_000,
-  taux_participation:   88,
-  cotisations_retard:   2,
-  prochain_beneficiaire: 'Solange K.',
-};
-
-const MOCK_STATS_MEMBRE = {
-  tontines_actives:     2,
-  cotisations_payees:   8,
-  cotisations_dues:     1,
-  mon_score:            84,
-  prochain_tour:        'Cycle 9 — dans 12 jours',
-  total_cotise:         200_000,
-};
-
-const MOCK_COTISATIONS_RECENTES = [
-  { id: '1', membre: 'Marcelline T.', tontine: 'Njangi Fonctionnaires', montant: 25_000, statut: 'payee', date: '2026-07-01' },
-  { id: '2', membre: 'Patrick N.',    tontine: 'Njangi Fonctionnaires', montant: 25_000, statut: 'payee', date: '2026-07-01' },
-  { id: '3', membre: 'Solange K.',    tontine: 'Njangi Fonctionnaires', montant: 25_000, statut: 'en_retard', date: '2026-06-30' },
-  { id: '4', membre: 'Jean-Paul M.',  tontine: 'Tontine Amis',         montant: 15_000, statut: 'en_attente', date: '2026-07-05' },
-];
-
-const MOCK_MES_COTISATIONS = [
-  { id: '1', tontine: 'Njangi Fonctionnaires', montant: 25_000, statut: 'payee',     date_echeance: '2026-07-01', cycle: 8 },
-  { id: '2', tontine: 'Tontine Amis',          montant: 15_000, statut: 'en_attente', date_echeance: '2026-07-10', cycle: 5 },
-];
-
-const MOCK_TONTINES_ORGA = [
-  { id: '1', nom: 'Njangi Fonctionnaires', membres: 12, cycle: 8, total: 12, statut: 'active', collecte: 2_400_000 },
-  { id: '2', nom: 'Tontine Amis Lycée',   membres: 8,  cycle: 4, total: 8,  statut: 'active', collecte: 480_000 },
-  { id: '3', nom: 'Épargne Famille',      membres: 8,  cycle: 1, total: 12, statut: 'active', collecte: 370_000 },
-];
-
-const MOCK_ALERTES_ADMIN = [
-  { id: '1', type: 'retard',    msg: '3 cotisations en retard sur Njangi Fonctionnaires', date: '2026-07-06' },
-  { id: '2', type: 'nouveau',   msg: '5 nouvelles inscriptions cette semaine', date: '2026-07-05' },
-  { id: '3', type: 'activite',  msg: 'Tontine "Épargne Famille" vient d\'être créée', date: '2026-07-04' },
-];
-
-// ═══════════════════════════════════════════════
-//  COMPOSANTS PARTAGÉS
-// ═══════════════════════════════════════════════
-
-interface StatCardProps {
-  icon: React.ElementType;
-  label: string;
-  value: string;
-  sub?: string;
-  iconClass?: string;
+// ── Spinner centralisé ───────────────────────────
+function Spinner() {
+  return (
+    <div className="flex items-center justify-center h-64">
+      <div className="w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
 }
 
-function StatCard({ icon: Icon, label, value, sub, iconClass = 'bg-primary-100 text-primary-700' }: StatCardProps) {
+// ── Stat card partagée ───────────────────────────
+function StatCard({ icon: Icon, label, value, sub, iconCls = 'bg-primary-100 text-primary-700' }: {
+  icon: React.ElementType; label: string; value: string; sub?: string; iconCls?: string;
+}) {
   return (
     <div className="stat-card">
-      <div className={`stat-icon ${iconClass}`}>
-        <Icon className="w-5 h-5" />
-      </div>
+      <div className={`stat-icon ${iconCls}`}><Icon className="w-5 h-5" /></div>
       <div className="min-w-0">
         <p className="text-xs text-gray-400 font-medium mb-0.5">{label}</p>
         <p className="text-xl font-display font-bold text-gray-900 leading-none">{value}</p>
@@ -92,130 +41,100 @@ function StatCard({ icon: Icon, label, value, sub, iconClass = 'bg-primary-100 t
   );
 }
 
-// ═══════════════════════════════════════════════
+// ════════════════════════════════════════════════
 //  DASHBOARD ADMIN
-// ═══════════════════════════════════════════════
-
+// ════════════════════════════════════════════════
 function AdminDashboard({ prenom }: { prenom: string }) {
-  const s = MOCK_STATS_ADMIN;
+  const { data: stats, isLoading } = useStatsAdmin();
+  const { data: tontines = [] }    = useAllTontines();
+  const { data: notifs = [] }      = useNotifications(undefined);
+
+  if (isLoading) return <Spinner />;
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* En-tête */}
       <div className="page-header">
         <div className="flex items-center gap-2 mb-1">
           <div className="w-6 h-6 bg-red-100 rounded-md flex items-center justify-center">
             <RiShieldCheckLine className="w-3.5 h-3.5 text-red-600" />
           </div>
-          <span className="text-xs font-semibold text-red-600 uppercase tracking-wider">Administration plateforme</span>
+          <span className="text-xs font-semibold text-red-600 uppercase tracking-wider">Administration</span>
         </div>
         <h1 className="page-title">Tableau de bord</h1>
         <p className="page-subtitle">Bonjour {prenom} — Vue globale de TontineDigitale</p>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        <StatCard icon={RiStackLine}       label="Tontines actives"      value={`${s.tontines_actives} / ${s.total_tontines}`}  iconClass="bg-primary-100 text-primary-700" />
-        <StatCard icon={RiGroupLine}       label="Utilisateurs"          value={s.total_utilisateurs.toString()}                iconClass="bg-blue-100 text-blue-700" />
-        <StatCard icon={RiWalletLine}      label="Volume total collecté" value={formatMontant(s.total_collecte)}               iconClass="bg-amber-100 text-amber-700" />
-        <StatCard icon={RiBarChartLine}    label="Taux de participation" value={`${s.taux_participation}%`}                    iconClass="bg-green-100 text-green-700" />
-        <StatCard icon={RiUserLine}        label="Nouvelles inscriptions" value={`+${s.nouvelles_inscriptions}`} sub="ce mois" iconClass="bg-violet-100 text-violet-700" />
-        <StatCard icon={RiCheckDoubleLine} label="Santé plateforme"       value="Opérationnelle"                               iconClass="bg-emerald-100 text-emerald-700" />
+        <StatCard icon={RiStackLine}             label="Tontines actives"      value={`${stats?.tontines_actives ?? 0}/${stats?.total_tontines ?? 0}`}  iconCls="bg-primary-100 text-primary-700" />
+        <StatCard icon={RiGroupLine}             label="Utilisateurs"          value={String(stats?.total_utilisateurs ?? 0)}                            iconCls="bg-blue-100 text-blue-700" />
+        <StatCard icon={RiWalletLine}            label="Volume collecté"       value={formatMontant(stats?.volume_collecte ?? 0)}                       iconCls="bg-amber-100 text-amber-700" />
+        <StatCard icon={RiBarChartLine}          label="Taux participation"    value={`${stats?.taux_participation ?? 0}%`}                              iconCls="bg-green-100 text-green-700" />
+        <StatCard icon={RiAlertLine}             label="Cotisations en retard" value={String(stats?.cotisations_retard ?? 0)}                            iconCls="bg-red-100 text-red-700" />
+        <StatCard icon={RiUserLine}              label="Inscriptions ce mois"  value={`+${stats?.nouvelles_inscriptions ?? 0}`}                          iconCls="bg-violet-100 text-violet-700" />
       </div>
 
-      {/* Alertes + Raccourcis */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Alertes */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-display font-bold text-gray-900 text-base">Alertes récentes</h2>
-            <span className="badge-red">{MOCK_ALERTES_ADMIN.length}</span>
-          </div>
-          <div className="space-y-3">
-            {MOCK_ALERTES_ADMIN.map(a => (
-              <div key={a.id} className="flex items-start gap-3 p-3 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors">
-                <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                  a.type === 'retard' ? 'bg-red-100' : a.type === 'nouveau' ? 'bg-blue-100' : 'bg-green-100'
-                }`}>
-                  <RiAlertLine className={`w-3.5 h-3.5 ${
-                    a.type === 'retard' ? 'text-red-600' : a.type === 'nouveau' ? 'text-blue-600' : 'text-green-600'
-                  }`} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-gray-700">{a.msg}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{formatDate(a.date)}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Accès rapides */}
-        <div className="card">
-          <h2 className="font-display font-bold text-gray-900 text-base mb-4">Accès rapides</h2>
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { label: 'Toutes les tontines', icon: RiStackLine, href: '/admin/tontines', color: 'bg-primary-50 text-primary-700 hover:bg-primary-100' },
-              { label: 'Utilisateurs',        icon: RiGroupLine, href: '/admin/utilisateurs', color: 'bg-blue-50 text-blue-700 hover:bg-blue-100' },
-              { label: 'Rapports',            icon: RiFileChartLine, href: '/admin/rapports', color: 'bg-amber-50 text-amber-700 hover:bg-amber-100' },
-              { label: 'Sécurité',            icon: RiShieldCheckLine, href: '/admin/securite', color: 'bg-red-50 text-red-700 hover:bg-red-100' },
-            ].map(({ label, icon: Icon, href, color }) => (
-              <Link key={href} to={href} className={`flex flex-col items-center gap-2 p-4 rounded-xl transition-colors cursor-pointer ${color}`}>
-                <Icon className="w-6 h-6" />
-                <span className="text-xs font-semibold text-center">{label}</span>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Dernières cotisations */}
+      {/* Top tontines */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display font-bold text-gray-900 text-base">Cotisations récentes</h2>
+          <h2 className="font-display font-bold text-gray-900 text-base">Tontines actives</h2>
           <Link to="/admin/tontines" className="text-xs text-primary-600 font-medium hover:underline flex items-center gap-1">
             Tout voir <RiArrowRightLine className="w-3.5 h-3.5" />
           </Link>
         </div>
-        <div className="table-wrapper">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Membre</th>
-                <th>Tontine</th>
-                <th>Montant</th>
-                <th>Statut</th>
-                <th>Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {MOCK_COTISATIONS_RECENTES.map(c => (
-                <tr key={c.id}>
-                  <td className="font-medium text-gray-800">{c.membre}</td>
-                  <td className="text-gray-500">{c.tontine}</td>
-                  <td className="font-mono font-medium">{formatMontant(c.montant)}</td>
-                  <td><span className={getStatutColor(c.statut)}>{getStatutLabel(c.statut)}</span></td>
-                  <td className="text-gray-400 text-xs">{formatDate(c.date)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {tontines.slice(0, 5).map(t => (
+          <Link key={t.id} to={`/tontines/${t.id}`}
+            className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0 hover:bg-gray-50 px-1 rounded-lg transition-colors group">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                <span className="text-primary-700 font-bold text-sm">{t.nom.charAt(0)}</span>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-800 group-hover:text-primary-700">{t.nom}</p>
+                <p className="text-xs text-gray-400">Cycle {t.cycle_actuel}/{t.total_cycles}</p>
+              </div>
+            </div>
+            <span className={cn('badge', getStatutColor(t.statut))}>{getStatutLabel(t.statut)}</span>
+          </Link>
+        ))}
+      </div>
+
+      {/* Accès rapides */}
+      <div className="card">
+        <h2 className="font-display font-bold text-gray-900 text-base mb-4">Actions rapides</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: 'Tontines',      icon: RiStackLine,       href: '/admin/tontines',     cls: 'bg-primary-50 text-primary-700 hover:bg-primary-100' },
+            { label: 'Utilisateurs',  icon: RiGroupLine,       href: '/admin/utilisateurs', cls: 'bg-blue-50 text-blue-700 hover:bg-blue-100' },
+            { label: 'Rapports',      icon: RiFileChartLine,   href: '/admin/rapports',     cls: 'bg-amber-50 text-amber-700 hover:bg-amber-100' },
+            { label: 'Sécurité',      icon: RiShieldCheckLine, href: '/admin/securite',     cls: 'bg-red-50 text-red-700 hover:bg-red-100' },
+          ].map(({ label, icon: Icon, href, cls }) => (
+            <Link key={href} to={href}
+              className={`flex flex-col items-center gap-2 p-4 rounded-xl transition-colors text-center ${cls}`}>
+              <Icon className="w-6 h-6" />
+              <span className="text-xs font-semibold">{label}</span>
+            </Link>
+          ))}
         </div>
       </div>
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════
+// ════════════════════════════════════════════════
 //  DASHBOARD ORGANISATEUR
-// ═══════════════════════════════════════════════
+// ════════════════════════════════════════════════
+function OrgaDashboard({ prenom, userId }: { prenom: string; userId: string }) {
+  const { data: tontines = [], isLoading } = useTontines(userId);
+  const { data: cotisations = [] }         = useMesCotisations(userId);
 
-function OrgaDashboard({ prenom }: { prenom: string }) {
-  const s = MOCK_STATS_ORGA;
+  if (isLoading) return <Spinner />;
+
+  const totalCollecte  = cotisations.filter(c => c.statut === 'payee').reduce((s, c) => s + c.montant_paye, 0);
+  const enRetard       = cotisations.filter(c => c.statut === 'en_retard').length;
+  const membresTotal   = tontines.reduce((s, t) => s + t.nombre_membres_max, 0);
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* En-tête */}
       <div className="page-header">
         <div className="flex items-center gap-2 mb-1">
           <div className="w-6 h-6 bg-amber-100 rounded-md flex items-center justify-center">
@@ -227,109 +146,113 @@ function OrgaDashboard({ prenom }: { prenom: string }) {
         <p className="page-subtitle">Bonjour {prenom} — Gérez vos tontines</p>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        <StatCard icon={RiStackLine}         label="Mes tontines"          value={s.mes_tontines.toString()}             iconClass="bg-primary-100 text-primary-700" />
-        <StatCard icon={RiGroupLine}         label="Membres au total"      value={s.membres_total.toString()}            iconClass="bg-blue-100 text-blue-700" />
-        <StatCard icon={RiWalletLine}        label="Total collecté"        value={formatMontant(s.total_collecte)}       iconClass="bg-amber-100 text-amber-700" />
-        <StatCard icon={RiBarChartLine}      label="Taux de participation" value={`${s.taux_participation}%`}            iconClass="bg-green-100 text-green-700" />
-        <StatCard icon={RiAlertLine}         label="Cotisations en retard" value={s.cotisations_retard.toString()}       iconClass="bg-red-100 text-red-700" />
-        <StatCard icon={RiTrophyLine}        label="Prochain bénéficiaire" value={s.prochain_beneficiaire} sub="Cycle 9" iconClass="bg-violet-100 text-violet-700" />
+        <StatCard icon={RiStackLine}   label="Mes tontines"     value={String(tontines.length)}           iconCls="bg-primary-100 text-primary-700" />
+        <StatCard icon={RiGroupLine}   label="Membres total"    value={String(membresTotal)}              iconCls="bg-blue-100 text-blue-700" />
+        <StatCard icon={RiWalletLine}  label="Total collecté"   value={formatMontant(totalCollecte)}      iconCls="bg-amber-100 text-amber-700" />
+        <StatCard icon={RiAlertLine}   label="Retards"          value={String(enRetard)}                  iconCls={enRetard > 0 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'} />
+        <StatCard icon={RiCheckDoubleLine} label="Payées"       value={String(cotisations.filter(c => c.statut === 'payee').length)} iconCls="bg-green-100 text-green-700" />
       </div>
 
-      {/* CTA Créer tontine */}
+      {/* CTA créer tontine */}
       <div className="bg-gradient-to-r from-primary-700 to-primary-800 rounded-2xl p-5 flex items-center justify-between">
         <div>
           <p className="text-white font-display font-bold text-base">Créer une nouvelle tontine</p>
-          <p className="text-primary-300 text-sm mt-0.5">Configurez les règles, invitez vos membres en quelques clics.</p>
+          <p className="text-primary-300 text-sm mt-0.5">Invitez vos membres en quelques clics.</p>
         </div>
         <Link to="/tontines/creer" className="btn bg-white text-primary-700 hover:bg-primary-50 font-bold flex-shrink-0">
-          <RiAddCircleLine className="w-4 h-4" />
-          Créer
+          <RiAddCircleLine className="w-4 h-4" /> Créer
         </Link>
       </div>
 
       {/* Mes tontines */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display font-bold text-gray-900 text-base">Mes tontines actives</h2>
-          <Link to="/tontines" className="text-xs text-primary-600 font-medium hover:underline flex items-center gap-1">
-            Tout voir <RiArrowRightLine className="w-3.5 h-3.5" />
+      {tontines.length === 0 ? (
+        <div className="card text-center py-12">
+          <p className="text-gray-400 text-sm">Vous n'avez pas encore de tontine.</p>
+          <Link to="/tontines/creer" className="btn-primary mt-4 inline-flex">
+            <RiAddCircleLine className="w-4 h-4" /> Créer ma première tontine
           </Link>
         </div>
-        <div className="space-y-3">
-          {MOCK_TONTINES_ORGA.map(t => (
-            <Link key={t.id} to={`/tontines/${t.id}`}
-              className="flex items-center justify-between p-4 rounded-xl bg-gray-50 hover:bg-primary-50 hover:border-primary-200 border border-transparent transition-all group">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                  <span className="text-primary-700 font-display font-bold text-sm">
-                    {t.nom.charAt(0)}
-                  </span>
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-800 text-sm group-hover:text-primary-700">{t.nom}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{t.membres} membres · Cycle {t.cycle}/{t.total}</p>
-                </div>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-bold text-gray-900">{formatMontant(t.collecte)}</p>
-                <span className={`${getStatutColor(t.statut)} text-xs`}>{getStatutLabel(t.statut)}</span>
-              </div>
+      ) : (
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-display font-bold text-gray-900 text-base">Mes tontines actives</h2>
+            <Link to="/tontines" className="text-xs text-primary-600 font-medium hover:underline flex items-center gap-1">
+              Tout voir <RiArrowRightLine className="w-3.5 h-3.5" />
             </Link>
-          ))}
+          </div>
+          <div className="space-y-3">
+            {tontines.slice(0, 4).map(t => (
+              <Link key={t.id} to={`/tontines/${t.id}`}
+                className="flex items-center justify-between p-4 rounded-xl bg-gray-50 hover:bg-primary-50 border border-transparent hover:border-primary-200 transition-all group">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <span className="text-primary-700 font-display font-bold text-sm">{t.nom.charAt(0)}</span>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800 text-sm group-hover:text-primary-700 truncate max-w-[180px]">{t.nom}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Cycle {t.cycle_actuel}/{t.total_cycles}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-bold text-gray-900">{formatMontant(t.montant_cotisation, t.devise)}</p>
+                  <span className={cn('badge text-xs', getStatutColor(t.statut))}>{getStatutLabel(t.statut)}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Cotisations récentes */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display font-bold text-gray-900 text-base">Cotisations à valider</h2>
-          <span className="badge-yellow">{MOCK_COTISATIONS_RECENTES.filter(c => c.statut === 'en_attente' || c.statut === 'en_retard').length} en attente</span>
+      {/* Cotisations en attente */}
+      {cotisations.filter(c => c.statut === 'en_attente' || c.statut === 'en_retard').length > 0 && (
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-display font-bold text-gray-900 text-base">Cotisations à valider</h2>
+            <span className="badge-yellow">
+              {cotisations.filter(c => c.statut === 'en_attente' || c.statut === 'en_retard').length} en attente
+            </span>
+          </div>
+          <div className="table-wrapper">
+            <table className="table">
+              <thead><tr><th>Tontine</th><th>Montant</th><th>Statut</th><th>Échéance</th></tr></thead>
+              <tbody>
+                {cotisations
+                  .filter(c => c.statut === 'en_attente' || c.statut === 'en_retard')
+                  .slice(0, 5)
+                  .map(c => (
+                    <tr key={c.id}>
+                      <td className="text-sm text-gray-600">{(c as any).tontine?.nom ?? '—'}</td>
+                      <td className="font-mono font-semibold">{formatMontant(c.montant_du)}</td>
+                      <td><span className={cn('badge', getStatutColor(c.statut))}>{getStatutLabel(c.statut)}</span></td>
+                      <td className="text-xs text-gray-400">{formatDate(c.date_echeance)}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div className="table-wrapper">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Membre</th>
-                <th>Montant</th>
-                <th>Statut</th>
-                <th>Date</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {MOCK_COTISATIONS_RECENTES.map(c => (
-                <tr key={c.id}>
-                  <td className="font-medium text-gray-800">{c.membre}</td>
-                  <td className="font-mono font-medium">{formatMontant(c.montant)}</td>
-                  <td><span className={getStatutColor(c.statut)}>{getStatutLabel(c.statut)}</span></td>
-                  <td className="text-gray-400 text-xs">{formatDate(c.date)}</td>
-                  <td>
-                    {c.statut === 'en_attente' && (
-                      <button className="btn-primary btn-sm">Valider</button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════
+// ════════════════════════════════════════════════
 //  DASHBOARD MEMBRE
-// ═══════════════════════════════════════════════
+// ════════════════════════════════════════════════
+function MembreDashboard({ prenom, userId }: { prenom: string; userId: string }) {
+  const { data: tontines = [],    isLoading }  = useTontines(userId);
+  const { data: cotisations = [] }             = useMesCotisations(userId);
+  const { data: score = 50 }                   = useTontineScore(userId);
 
-function MembreDashboard({ prenom }: { prenom: string }) {
-  const s = MOCK_STATS_MEMBRE;
+  if (isLoading) return <Spinner />;
+
+  const payees    = cotisations.filter(c => c.statut === 'payee').length;
+  const enAttente = cotisations.filter(c => c.statut === 'en_attente' || c.statut === 'en_retard').length;
+  const totalCotise = cotisations.reduce((s, c) => s + c.montant_paye, 0);
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* En-tête */}
       <div className="page-header">
         <div className="flex items-center gap-2 mb-1">
           <div className="w-6 h-6 bg-teal-100 rounded-md flex items-center justify-center">
@@ -341,115 +264,124 @@ function MembreDashboard({ prenom }: { prenom: string }) {
         <p className="page-subtitle">Bonjour {prenom} — Votre espace membre</p>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        <StatCard icon={RiGroupLine}        label="Tontines actives"    value={s.tontines_actives.toString()}          iconClass="bg-primary-100 text-primary-700" />
-        <StatCard icon={RiCheckDoubleLine}   label="Cotisations payées"  value={`${s.cotisations_payees} cycles`}       iconClass="bg-green-100 text-green-700" />
-        <StatCard icon={RiTimeLine}          label="À payer"             value={`${s.cotisations_dues} cotisation`}     iconClass={s.cotisations_dues > 0 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'} />
-        <StatCard icon={RiWalletLine}        label="Total cotisé"        value={formatMontant(s.total_cotise)}          iconClass="bg-amber-100 text-amber-700" />
-        <StatCard icon={RiCalendarCheckLine} label="Prochain tour"       value={s.prochain_tour}                        iconClass="bg-violet-100 text-violet-700" />
-        <StatCard icon={RiStarLine}          label="Mon TontineScore"    value={`${s.mon_score} / 100`} sub="Fiable"   iconClass="bg-teal-100 text-teal-700" />
+        <StatCard icon={RiGroupLine}         label="Tontines actives"   value={String(tontines.length)}    iconCls="bg-primary-100 text-primary-700" />
+        <StatCard icon={RiCheckDoubleLine}   label="Cotisations payées" value={`${payees} cycles`}          iconCls="bg-green-100 text-green-700" />
+        <StatCard icon={RiTimeLine}          label="À payer"            value={`${enAttente}`}              iconCls={enAttente > 0 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'} />
+        <StatCard icon={RiWalletLine}        label="Total cotisé"       value={formatMontant(totalCotise)} iconCls="bg-amber-100 text-amber-700" />
+        <StatCard icon={RiStarLine}          label="TontineScore"       value={`${score}/100`} sub={score >= 80 ? 'Excellent' : score >= 60 ? 'Bon' : 'À améliorer'} iconCls="bg-teal-100 text-teal-700" />
       </div>
 
-      {/* Score de fiabilité */}
+      {/* TontineScore visuel */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h2 className="font-display font-bold text-gray-900 text-base">Mon TontineScore</h2>
             <p className="text-xs text-gray-400 mt-0.5">Basé sur votre régularité de paiement</p>
           </div>
-          <div className="text-right">
-            <p className="text-3xl font-display font-bold text-primary-700">{s.mon_score}</p>
-            <p className="text-xs text-gray-400">/ 100</p>
-          </div>
+          <p className="text-3xl font-display font-bold text-primary-700">{score}<span className="text-base text-gray-400">/100</span></p>
         </div>
-        {/* Barre de score */}
         <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-gradient-to-r from-primary-500 to-primary-600 rounded-full transition-all duration-700"
-            style={{ width: `${s.mon_score}%` }}
-          />
+          <div className={cn(
+            'h-full rounded-full transition-all duration-700',
+            score >= 80 ? 'bg-green-500' : score >= 60 ? 'bg-amber-400' : 'bg-red-400'
+          )} style={{ width: `${score}%` }} />
         </div>
-        <div className="flex justify-between mt-2">
-          <span className="text-xs text-gray-400">Peu fiable</span>
-          <span className="text-xs text-gray-400">Excellent</span>
-        </div>
-        <div className="mt-4 grid grid-cols-3 gap-3">
-          {[
-            { label: 'Paiements à temps', val: '8/9', color: 'text-green-700 bg-green-50' },
-            { label: 'Cycles honorés',    val: '8',    color: 'text-blue-700 bg-blue-50' },
-            { label: 'Pénalités reçues',  val: '0',    color: 'text-gray-700 bg-gray-50' },
-          ].map(({ label, val, color }) => (
-            <div key={label} className={`rounded-xl p-3 ${color}`}>
-              <p className="text-lg font-display font-bold">{val}</p>
-              <p className="text-xs mt-0.5 opacity-75">{label}</p>
-            </div>
-          ))}
+        <div className="flex justify-between text-xs text-gray-400 mt-1.5">
+          <span>Peu fiable</span>
+          <span>{score >= 80 ? '✓ Score excellent' : score >= 60 ? 'Score correct' : 'Score faible'}</span>
+          <span>Excellent</span>
         </div>
       </div>
 
       {/* Mes cotisations à venir */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display font-bold text-gray-900 text-base">Mes prochaines cotisations</h2>
-          <Link to="/cotisations" className="text-xs text-primary-600 font-medium hover:underline flex items-center gap-1">
-            Tout voir <RiArrowRightLine className="w-3.5 h-3.5" />
+      {cotisations.length > 0 && (
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-display font-bold text-gray-900 text-base">Mes prochaines cotisations</h2>
+            <Link to="/cotisations" className="text-xs text-primary-600 font-medium hover:underline flex items-center gap-1">
+              Tout voir <RiArrowRightLine className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+          <div className="space-y-3">
+            {cotisations.slice(0, 4).map(c => (
+              <div key={c.id} className="flex items-center justify-between p-4 rounded-xl bg-gray-50 border border-gray-100">
+                <div className="flex items-center gap-3">
+                  <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0',
+                    c.statut === 'payee' ? 'bg-green-100' : c.statut === 'en_retard' ? 'bg-red-100' : 'bg-amber-100'
+                  )}>
+                    {c.statut === 'payee'
+                      ? <RiCheckDoubleLine className="w-4 h-4 text-green-600" />
+                      : c.statut === 'en_retard'
+                      ? <RiAlertLine className="w-4 h-4 text-red-600" />
+                      : <RiTimeLine className="w-4 h-4 text-amber-600" />
+                    }
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800 text-sm">{(c as any).tontine?.nom ?? 'Tontine'}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Cycle {c.cycle_numero} · Échéance {formatDate(c.date_echeance)}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="font-bold text-gray-900 text-sm">{formatMontant(c.montant_du)}</p>
+                  <span className={cn('badge text-xs', getStatutColor(c.statut))}>{getStatutLabel(c.statut)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* CTA rejoindre une tontine */}
+      {tontines.length === 0 && (
+        <div className="bg-gradient-to-r from-teal-600 to-primary-700 rounded-2xl p-5 flex items-center justify-between">
+          <div>
+            <p className="text-white font-display font-bold text-base">Rejoindre une tontine</p>
+            <p className="text-primary-200 text-sm mt-0.5">Utilisez un lien d'invitation reçu par email ou WhatsApp.</p>
+          </div>
+          <Link to="/tontines" className="btn bg-white text-primary-700 hover:bg-primary-50 font-bold flex-shrink-0">
+            Voir mes invitations
           </Link>
         </div>
-        <div className="space-y-3">
-          {MOCK_MES_COTISATIONS.map(c => (
-            <div key={c.id} className="flex items-center justify-between p-4 rounded-xl bg-gray-50 border border-gray-100">
-              <div className="flex items-center gap-3">
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                  c.statut === 'payee' ? 'bg-green-100' : 'bg-amber-100'
-                }`}>
-                  {c.statut === 'payee'
-                    ? <RiCheckDoubleLine className="w-4 h-4 text-green-600" />
-                    : <RiTimeLine className="w-4 h-4 text-amber-600" />
-                  }
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-800 text-sm">{c.tontine}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Cycle {c.cycle} · Échéance {formatDate(c.date_echeance)}</p>
-                </div>
-              </div>
-              <div className="text-right">
-                <p className="font-bold text-gray-900 text-sm">{formatMontant(c.montant)}</p>
-                <span className={`${getStatutColor(c.statut)} text-xs mt-0.5 inline-block`}>{getStatutLabel(c.statut)}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Rejoindre une tontine */}
-      <div className="bg-gradient-to-r from-teal-600 to-primary-700 rounded-2xl p-5 flex items-center justify-between">
-        <div>
-          <p className="text-white font-display font-bold text-base">Rejoindre une tontine</p>
-          <p className="text-primary-200 text-sm mt-0.5">Utilisez un lien d'invitation pour rejoindre un groupe.</p>
-        </div>
-        <Link to="/tontines" className="btn bg-white text-primary-700 hover:bg-primary-50 font-bold flex-shrink-0">
-          Voir les invitations
-        </Link>
-      </div>
+      )}
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════
-//  COMPOSANT PRINCIPAL — switch sur le rôle
-// ═══════════════════════════════════════════════
-
+// ════════════════════════════════════════════════
+//  COMPOSANT PRINCIPAL avec logique de promotion
+// ════════════════════════════════════════════════
 export function DashboardPage() {
-  const { profile, loading } = useAuth();
+  const { profile, loading, refreshProfile } = useAuth();
+  const navigate = useNavigate();
+  const { data: tontines = [] } = useTontines(profile?.id);
 
-  if (loading || !profile) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
+  // ── Promotion automatique membre → organisateur ──
+  useEffect(() => {
+    async function verifierPromotion() {
+      if (!profile) return;
+      if (profile.role_global !== 'membre') return;
+
+      // Si l'utilisateur a créé au moins une tontine → promouvoir
+      const aTontine = tontines.some(t => t.organisateur_id === profile.id);
+      if (!aTontine) return;
+
+      // Appel Supabase pour changer le rôle
+      const { supabase } = await import('../../lib/supabase');
+      const { error } = await supabase
+        .from('profiles')
+        .update({ role_global: 'organisateur' })
+        .eq('id', profile.id);
+
+      if (!error) {
+        await refreshProfile(); // Recharger le profil dans AuthContext
+      }
+    }
+
+    verifierPromotion();
+  }, [tontines, profile, refreshProfile]);
+
+  if (loading || !profile) return <Spinner />;
 
   const prenom = profile.prenom || profile.nom || 'Utilisateur';
   const role: UserRole = profile.role_global;
@@ -458,10 +390,10 @@ export function DashboardPage() {
     case 'admin':
       return <AdminDashboard prenom={prenom} />;
     case 'organisateur':
-      return <OrgaDashboard prenom={prenom} />;
+      return <OrgaDashboard prenom={prenom} userId={profile.id} />;
     case 'membre':
     case 'tresorier':
     default:
-      return <MembreDashboard prenom={prenom} />;
+      return <MembreDashboard prenom={prenom} userId={profile.id} />;
   }
 }
