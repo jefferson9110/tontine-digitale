@@ -1,22 +1,28 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { useQuery, useQueryClient }  from '@tanstack/react-query';
+import { toast }     from 'react-hot-toast';
+import { supabase }  from '../../lib/supabase';
 import {
   RiArrowLeftLine, RiGroupLine, RiMoneyDollarCircleLine,
   RiCalendarLine, RiTrophyLine, RiShieldLine, RiLoader4Line,
   RiUserAddLine, RiShareLine, RiCheckLine, RiAlertLine,
-  RiDeleteBinLine, RiFilePdfLine, RiEditLine,
+  RiDeleteBinLine, RiFilePdfLine,
 } from 'react-icons/ri';
 import { useAuth }                        from '../../contexts/AuthContext';
 import { useTontine }                     from '../../hooks/useTontines';
-import { useMembres, useInviterMembre,
+import { useInviterMembre,
          useChangerStatutMembre,
          useTontineScore }               from '../../hooks/useMembres';
-import { useCotisations,
-         useValiderCotisation }           from '../../hooks/useCotisations';
+import { useCotisations }                from '../../hooks/useCotisations';
 import { useToursBeneficiaires }         from '../../hooks/useBeneficiaires';
 import { formatMontant, formatDate,
          getStatutColor, getStatutLabel,
          getFrequenceLabel, cn }          from '../../lib/utils';
+import { BoutonActiverTontine }          from '../../components/shared/BoutonActiverTontine';
+import { SimulationPaiement,
+         type CotisationAValider }        from '../../components/shared/SimulationPaiement';
+import { BoutonInvitationExterne } from '../../components/shared/BoutonInvitationExterne';
 
 type Onglet = 'apercu' | 'membres' | 'cotisations' | 'beneficiaires' | 'regles';
 
@@ -92,33 +98,93 @@ function OngletApercu({ tontine }: { tontine: any }) {
 
 // ── Onglet Membres ───────────────────────────────
 function OngletMembres({ tontineId, isOrga }: { tontineId: string; isOrga: boolean }) {
-  const { data: membres = [] }  = useMembres(tontineId);
-  const inviter                  = useInviterMembre();
-  const changerStatut            = useChangerStatutMembre();
+  const { profile } = useAuth();
+  const qc = useQueryClient();
+
+  const { data: membres = [], isLoading, refetch } = useQuery({
+    queryKey: ['membres_complet', tontineId],
+    enabled: !!tontineId,
+    queryFn: async () => {
+      const { data: rows, error } = await supabase
+        .from('membres_tontine')
+        .select('id, user_id, role, statut, ordre_beneficiaire, a_beneficie, date_adhesion')
+        .eq('tontine_id', tontineId)
+        .order('date_adhesion', { ascending: true });
+
+      if (error || !rows || rows.length === 0) return [];
+
+      const ids = rows.map(r => r.user_id);
+      const { data: profils } = await supabase
+        .from('profiles')
+        .select('id, nom, prenom, email')
+        .in('id', ids);
+
+      return rows.map(row => ({
+        ...row,
+        user: profils?.find(p => p.id === row.user_id) ?? null,
+      }));
+    },
+  });
+
+  const inviter       = useInviterMembre();
+  const changerStatut = useChangerStatutMembre();
 
   const [showInvite, setShowInvite] = useState(false);
   const [email,      setEmail]      = useState('');
   const [copied,     setCopied]     = useState(false);
+  const [accepting,  setAccepting]  = useState<string | null>(null);
 
   function copyLink() {
     navigator.clipboard.writeText(window.location.origin + `/rejoindre/${tontineId}`);
     setCopied(true); setTimeout(() => setCopied(false), 2000);
   }
 
+  async function handleAccepter(membreId: string) {
+    setAccepting(membreId);
+    try {
+      const { data, error } = await supabase
+        .rpc('accepter_membre', { p_membre_id: membreId });
+
+      if (error) throw error;
+      if (data && !data.success) throw new Error(data.message);
+
+      toast.success('Membre accepté !');
+      qc.invalidateQueries({ queryKey: ['membres_complet', tontineId] });
+    } catch (err: any) {
+      toast.error(err.message ?? 'Erreur lors de l\'acceptation');
+    } finally {
+      setAccepting(null);
+    }
+  }
+
+  async function handleRefuser(membreId: string) {
+    await changerStatut.mutateAsync({ membreId, tontineId, statut: 'exclu' });
+  }
+
+  const enAttente = membres.filter(m => m.statut === 'en_attente' || m.statut === 'invite');
+  const actifs    = membres.filter(m => m.statut === 'actif');
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-40">
+        <div className="w-6 h-6 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {isOrga && (
-        <div className="flex gap-3 flex-wrap">
-          <button onClick={() => setShowInvite(s => !s)} className="btn-primary">
-            <RiUserAddLine className="w-4 h-4" /> Inviter par email
-          </button>
-          <button onClick={copyLink} className="btn-outline">
-            <RiShareLine className="w-4 h-4" />
-            {copied ? 'Lien copié !' : 'Copier le lien'}
-          </button>
-        </div>
-      )}
-
+     {isOrga && (
+      <div className="flex gap-3 flex-wrap">
+        <button onClick={() => setShowInvite(s => !s)} className="btn-primary">
+          <RiUserAddLine className="w-4 h-4" /> Inviter par email
+        </button>
+        <BoutonInvitationExterne              // ← ajouter ici
+          tontineId={tontineId}
+          tontineNom="Nom de la tontine"      // passer le vrai nom
+        />
+      </div>
+    )}
       {showInvite && (
         <div className="card animate-fade-in">
           <h3 className="font-semibold text-gray-800 mb-3">Inviter un membre</h3>
@@ -126,101 +192,161 @@ function OngletMembres({ tontineId, isOrga }: { tontineId: string; isOrga: boole
             <input type="email" placeholder="email@exemple.com" value={email}
               onChange={e => setEmail(e.target.value)} className="input flex-1" />
             <button
-              onClick={() => inviter.mutate({ tontineId, email }, { onSuccess: () => { setEmail(''); setShowInvite(false); }})}
+              onClick={() => inviter.mutate({ tontineId, email },
+                { onSuccess: () => { setEmail(''); setShowInvite(false); refetch(); } }
+              )}
               disabled={inviter.isPending || !email}
-              className="btn-primary">
-              {inviter.isPending ? <RiLoader4Line className="w-4 h-4 animate-spin" /> : 'Inviter'}
+              className="btn-primary"
+            >
+              {inviter.isPending
+                ? <RiLoader4Line className="w-4 h-4 animate-spin" />
+                : 'Inviter'}
             </button>
           </div>
         </div>
       )}
 
-      <div className="card !p-0 overflow-hidden">
-        {membres.length === 0 ? (
-          <div className="empty-state py-10">
-            <p className="text-gray-400 text-sm">Aucun membre encore.</p>
-          </div>
-        ) : membres.map(m => (
-          <div key={m.id} className={cn(
-            'flex items-center gap-3 px-4 py-3.5 border-b border-gray-100 last:border-0',
-            m.statut === 'suspendu' && 'opacity-60 bg-gray-50'
-          )}>
-            <div className="w-9 h-9 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0">
-              <span className="text-primary-700 font-bold text-sm">
-                {(m.user as any)?.prenom?.charAt(0)}{(m.user as any)?.nom?.charAt(0)}
-              </span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="font-semibold text-gray-800 text-sm truncate">
-                  {(m.user as any)?.prenom} {(m.user as any)?.nom}
-                </p>
-                {m.role === 'organisateur' && <span className="badge badge-green text-xs">Organisateur</span>}
-                {m.role === 'tresorier'    && <span className="badge badge-blue text-xs">Trésorier</span>}
-              </div>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {m.a_beneficie ? '✓ A bénéficié' : `Tour #${m.ordre_beneficiaire ?? '?'}`}
-                {' · '}Depuis {formatDate(m.date_adhesion)}
-              </p>
-            </div>
-
-            {m.user_id && <ScoreBadge userId={m.user_id} />}
-            <span className={cn('badge hidden sm:inline-flex', getStatutColor(m.statut))}>
-              {getStatutLabel(m.statut)}
+      {isOrga && enAttente.length > 0 && (
+        <div className="card border-2 border-amber-200 bg-amber-50/50">
+          <h3 className="font-semibold text-amber-800 text-sm mb-3 flex items-center gap-2">
+            <span className="w-5 h-5 bg-amber-500 text-white rounded-full flex items-center justify-center text-xs font-bold">
+              {enAttente.length}
             </span>
+            Demandes en attente de validation
+          </h3>
+          <div className="space-y-2">
+            {enAttente.map(m => {
+              const nom    = m.user?.nom    ?? '—';
+              const prenom = m.user?.prenom ?? '';
+              return (
+                <div key={m.id} className="flex items-center gap-3 bg-white rounded-xl p-3 border border-amber-100">
+                  <div className="w-9 h-9 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-amber-700 font-bold text-sm">
+                      {prenom.charAt(0)}{nom.charAt(0)}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-gray-800 text-sm">{prenom} {nom}</p>
+                    <p className="text-xs text-gray-400">
+                      {m.statut === 'invite' ? 'Invité' : 'Demande directe'} · {formatDate(m.date_adhesion)}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => handleAccepter(m.id)}
+                      disabled={accepting === m.id}
+                      className="btn-primary btn-sm"
+                    >
+                      {accepting === m.id
+                        ? <RiLoader4Line className="w-3.5 h-3.5 animate-spin" />
+                        : <RiCheckLine className="w-3.5 h-3.5" />}
+                      Accepter
+                    </button>
+                    <button onClick={() => handleRefuser(m.id)} className="btn btn-danger btn-sm">
+                      <RiDeleteBinLine className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
-            {isOrga && m.role !== 'organisateur' && (
-              <div className="flex gap-1">
-                {m.statut === 'actif' ? (
-                  <button onClick={() => changerStatut.mutate({ membreId: m.id, tontineId, statut: 'suspendu' })}
-                    title="Suspendre" className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50">
-                    <RiAlertLine className="w-4 h-4" />
-                  </button>
-                ) : (
-                  <button onClick={() => changerStatut.mutate({ membreId: m.id, tontineId, statut: 'actif' })}
-                    title="Réactiver" className="p-1.5 rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50">
-                    <RiCheckLine className="w-4 h-4" />
-                  </button>
-                )}
-                <button onClick={() => changerStatut.mutate({ membreId: m.id, tontineId, statut: 'exclu' })}
-                  title="Exclure" className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50">
-                  <RiDeleteBinLine className="w-4 h-4" />
-                </button>
+      <div className="card !p-0 overflow-hidden">
+        {actifs.length === 0 && enAttente.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+            <RiGroupLine className="w-10 h-10 mb-2 opacity-30" />
+            <p className="text-sm">Aucun membre pour le moment.</p>
+          </div>
+        ) : (
+          <>
+            {actifs.length > 0 && (
+              <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Membres actifs ({actifs.length})
+                </p>
               </div>
             )}
-          </div>
-        ))}
+            {actifs.map(m => {
+              const nom      = m.user?.nom     ?? '—';
+              const prenom   = m.user?.prenom  ?? '';
+              const initiales = `${prenom.charAt(0)}${nom.charAt(0)}`.toUpperCase();
+              return (
+                <div key={m.id} className="flex items-center gap-3 px-4 py-3.5 border-b border-gray-100 last:border-0">
+                  <div className="w-9 h-9 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-primary-700 font-bold text-sm">{initiales}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold text-gray-800 text-sm truncate">{prenom} {nom}</p>
+                      {m.role === 'organisateur' && <span className="badge badge-green text-xs">Organisateur</span>}
+                      {m.role === 'tresorier'    && <span className="badge badge-blue text-xs">Trésorier</span>}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {m.a_beneficie ? '✓ A bénéficié' : `Tour #${m.ordre_beneficiaire ?? '?'}`}
+                      {' · '}Depuis {formatDate(m.date_adhesion)}
+                    </p>
+                  </div>
+                  <span className={cn('badge hidden sm:inline-flex', getStatutColor(m.statut))}>
+                    {getStatutLabel(m.statut)}
+                  </span>
+                  {isOrga && m.role !== 'organisateur' && (
+                    <div className="flex gap-1">
+                      {m.statut === 'actif' ? (
+                        <button
+                          onClick={() => changerStatut.mutate({ membreId: m.id, tontineId, statut: 'suspendu' })}
+                          title="Suspendre"
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                        >
+                          <RiAlertLine className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => changerStatut.mutate({ membreId: m.id, tontineId, statut: 'actif' })}
+                          title="Réactiver"
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors"
+                        >
+                          <RiCheckLine className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => changerStatut.mutate({ membreId: m.id, tontineId, statut: 'exclu' })}
+                        title="Exclure"
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                      >
+                        <RiDeleteBinLine className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-// ── Onglet Cotisations du cycle ──────────────────
+// ── Onglet Cotisations ───────────────────────────
+// Seule modification par rapport à l'original :
+// Le bouton "Valider" ouvre SimulationPaiement au lieu d'une modal manuelle
 function OngletCotisations({ tontineId, isOrga, devise, cycleActuel }: {
   tontineId:   string;
   isOrga:      boolean;
   devise:      string;
   cycleActuel: number;
 }) {
-  const { profile }                    = useAuth();
-  const { data: cotisations = [] }     = useCotisations(tontineId, cycleActuel);
-  const valider                        = useValiderCotisation();
-  const [selected, setSelected]        = useState<any>(null);
-  const [reference, setReference]      = useState('');
+  const { profile }                = useAuth();
+  const qc                         = useQueryClient();
+  const { data: cotisations = [] } = useCotisations(tontineId, cycleActuel);
+
+  // Remplacement de l'état `selected` par `simulation` typé CotisationAValider
+  const [simulation, setSimulation] = useState<CotisationAValider | null>(null);
 
   const payees   = cotisations.filter((c: any) => c.statut === 'payee').length;
   const collecte = cotisations.reduce((s: number, c: any) => s + c.montant_paye, 0);
-
-  async function handleValider() {
-    if (!selected || !profile) return;
-    await valider.mutateAsync({
-      cotisationId: selected.id,
-      montantPaye: selected.montant_du + selected.penalite,
-      reference: reference || undefined,
-      validePar: profile.id,
-    });
-    setSelected(null); setReference('');
-  }
 
   return (
     <div className="space-y-4">
@@ -250,8 +376,10 @@ function OngletCotisations({ tontineId, isOrga, devise, cycleActuel }: {
             <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0',
               c.statut === 'payee' ? 'bg-green-100' : c.statut === 'en_retard' ? 'bg-red-100' : 'bg-amber-100'
             )}>
-              {c.statut === 'payee' ? <RiCheckLine className="w-4 h-4 text-green-600" />
-                : c.statut === 'en_retard' ? <RiAlertLine className="w-4 h-4 text-red-600" />
+              {c.statut === 'payee'
+                ? <RiCheckLine className="w-4 h-4 text-green-600" />
+                : c.statut === 'en_retard'
+                ? <RiAlertLine className="w-4 h-4 text-red-600" />
                 : <RiCalendarLine className="w-4 h-4 text-amber-600" />}
             </div>
             <div className="flex-1 min-w-0">
@@ -265,43 +393,40 @@ function OngletCotisations({ tontineId, isOrga, devise, cycleActuel }: {
               {c.penalite > 0 && <p className="text-xs text-red-500">+{formatMontant(c.penalite, devise as any)}</p>}
             </div>
             <span className={cn('badge', getStatutColor(c.statut))}>{getStatutLabel(c.statut)}</span>
+
+            {/* Bouton Valider — ouvre SimulationPaiement */}
             {isOrga && c.statut !== 'payee' && (
-              <button onClick={() => setSelected(c)} className="btn-primary btn-sm">Valider</button>
+              <button
+                onClick={() => setSimulation({
+                  id:           c.id,
+                  tontine_id:   tontineId,
+                  membre_id:    c.membre_id,
+                  user_id:      c.user_id,
+                  cycle_numero: c.cycle_numero,
+                  montant_du:   Number(c.montant_du),
+                  penalite:     Number(c.penalite ?? 0),
+                  devise,
+                  user:         c.user,
+                })}
+                className="btn-primary btn-sm"
+              >
+                Valider
+              </button>
             )}
           </div>
         ))}
       </div>
 
-      {/* Modal validation */}
-      {selected && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-slide-up">
-            <div className="p-6 border-b border-gray-100">
-              <h3 className="font-display font-bold text-gray-900">Valider la cotisation</h3>
-              <p className="text-sm text-gray-500 mt-1">{selected.user?.prenom} {selected.user?.nom}</p>
-            </div>
-            <div className="p-6 space-y-3">
-              <div className="bg-gray-50 rounded-xl p-4">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Total dû</span>
-                  <span className="font-bold">{formatMontant(selected.montant_du + selected.penalite, devise as any)}</span>
-                </div>
-              </div>
-              <div>
-                <label className="label">Référence</label>
-                <input type="text" placeholder="MTN-XXXXXXXX" value={reference}
-                  onChange={e => setReference(e.target.value)} className="input" />
-              </div>
-            </div>
-            <div className="p-6 border-t border-gray-100 flex gap-3">
-              <button onClick={() => { setSelected(null); setReference(''); }} className="btn-outline flex-1">Annuler</button>
-              <button onClick={handleValider} disabled={valider.isPending} className="btn-primary flex-1">
-                {valider.isPending ? <RiLoader4Line className="w-4 h-4 animate-spin" /> : <RiCheckLine className="w-4 h-4" />}
-                Confirmer
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Modal simulation paiement — isolée, n'affecte pas les autres onglets */}
+      {simulation && (
+        <SimulationPaiement
+          cotisation={simulation}
+          onClose={() => setSimulation(null)}
+          onSuccess={() => {
+            setSimulation(null);
+            qc.invalidateQueries({ queryKey: ['cotisations', tontineId, cycleActuel] });
+          }}
+        />
       )}
     </div>
   );
@@ -447,7 +572,16 @@ export function TontineDetailPage() {
           </div>
           {isOrga && (
             <div className="flex gap-2 flex-shrink-0">
-              <button className="btn-outline btn-sm"><RiFilePdfLine className="w-4 h-4" /> Rapport</button>
+              <BoutonActiverTontine
+                tontineId={tontine.id}
+                statut={tontine.statut}
+                cycleActuel={tontine.cycle_actuel}
+                totalCycles={tontine.total_cycles}
+                isOrga={isOrga}
+              />
+              <button className="btn-outline btn-sm">
+                <RiFilePdfLine className="w-4 h-4" /> Rapport
+              </button>
             </div>
           )}
         </div>
@@ -469,7 +603,14 @@ export function TontineDetailPage() {
       <div className="animate-fade-in">
         {onglet === 'apercu'        && <OngletApercu tontine={tontine} />}
         {onglet === 'membres'       && <OngletMembres tontineId={tontine.id} isOrga={isOrga} />}
-        {onglet === 'cotisations'   && <OngletCotisations tontineId={tontine.id} isOrga={isOrga} devise={tontine.devise} cycleActuel={tontine.cycle_actuel} />}
+        {onglet === 'cotisations'   && (
+          <OngletCotisations
+            tontineId={tontine.id}
+            cycleActuel={tontine.cycle_actuel}
+            devise={tontine.devise}
+            isOrga={isOrga}
+          />
+        )}
         {onglet === 'beneficiaires' && <OngletBeneficiaires tontineId={tontine.id} devise={tontine.devise} />}
         {onglet === 'regles'        && <OngletRegles tontine={tontine} />}
       </div>

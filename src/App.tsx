@@ -13,6 +13,7 @@ import { LandingPage }  from './pages/public/LandingPage';
 import { LoginPage }    from './pages/auth/LoginPage';
 import { RegisterPage } from './pages/auth/RegisterPage';
 import { RejoindreInvitationPage } from './pages/public/RejoindreInvitationPage';
+import { RejoindreViaLienPage } from './pages/public/RejoindreViaLienPage';
 
 // Pages utilisateur
 import { DashboardPage }     from './pages/membre/DashboardPage';
@@ -24,6 +25,8 @@ import { BeneficiairesPage } from './pages/membre/BeneficiairesPage';
 import { MessagesPage }      from './pages/membre/MessagesPage';
 import { NotificationsPage } from './pages/membre/NotificationsPage';
 import { ParametresPage }    from './pages/membre/ParametresPage';
+import { PaiementPage } from './pages/membre/PaiementPage';
+
 
 // Pages admin
 import { AdminDashboardPage }    from './pages/admin/AdminDashboardPage';
@@ -57,6 +60,7 @@ export default function App() {
 
               {/* Route d'invitation (accessible sans auth) */}
               <Route path="/rejoindre/:token" element={<RejoindreInvitationPage />} />
+              <Route path="/invitation/:token" element={<RejoindreViaLienPage />} />
 
               {/* ── Routes utilisateur protégées ── */}
               <Route element={<PrivateRoute />}>
@@ -69,6 +73,7 @@ export default function App() {
                   <Route path="/beneficiaires"         element={<BeneficiairesPage />} />
                   <Route path="/messages"              element={<MessagesPage />} />
                   <Route path="/notifications"         element={<NotificationsPage />} />
+                  <Route path="/paiements" element={<PaiementPage />} />
                   <Route path="/parametres"            element={<ParametresPage />} />
                 </Route>
               </Route>

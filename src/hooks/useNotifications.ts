@@ -27,35 +27,28 @@ export function useNotifications(userId?: string) {
   });
 
   // ── Realtime : nouvelles notifications live ───
-  useEffect(() => {
-    if (!userId) return;
+useEffect(() => {
+  if (!userId) return;
 
-    const channel = supabase
-      .channel(`notifs-${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event:  'INSERT',
-          schema: 'public',
-          table:  'notifications',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          // Invalider le cache pour recharger
-          qc.invalidateQueries({ queryKey: [...NOTIFS_KEY, userId] });
+  // Nom de canal unique par userId pour éviter les doublons
+  const channelName = `notifs-${userId}-${Math.random().toString(36).substring(2, 7)}`;
 
-          // Toast de notification live
-          const notif = payload.new as Notification;
-          toast(notif.titre, {
-            icon: '🔔',
-            duration: 4000,
-          });
-        }
-      )
-      .subscribe();
+  const channel = supabase
+    .channel(channelName)
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'notifications',
+      filter: `user_id=eq.${userId}`,
+    }, () => {
+      qc.invalidateQueries({ queryKey: ['notifications', userId] });
+    })
+    .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [userId, qc]);
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [userId, qc]);
 
   return query;
 }

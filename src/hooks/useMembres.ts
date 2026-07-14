@@ -52,56 +52,44 @@ export function useInviterMembre() {
     mutationFn: async ({
       tontineId,
       email,
-    }: { tontineId: string; email: string }) => {
-      // 1. Trouver l'utilisateur par email dans profiles
-      const { data: profil, error: pe } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('email', email.trim().toLowerCase())
-        .single();
+    }: {
+      tontineId: string;
+      email:     string;
+    }) => {
+      // Appel unique → SQL gère tout
+      const { data, error } = await supabase
+        .rpc('envoyer_invitation', {
+          p_tontine_id: tontineId,
+          p_email:      email.trim().toLowerCase(),
+        });
 
-      if (pe || !profil) {
-        throw new Error('Aucun compte trouvé avec cet email. L\'utilisateur doit d\'abord s\'inscrire.');
+      if (error) throw new Error(error.message);
+
+      if (data && !data.success) {
+        // Messages d'erreur contextuels selon le code
+        const msgs: Record<string, string> = {
+          USER_NOT_FOUND:    `Aucun compte trouvé avec l'adresse "${email}". L'utilisateur doit d'abord s'inscrire sur TontineDigitale.`,
+          ALREADY_MEMBER:    'Cet utilisateur est déjà membre actif de cette tontine.',
+          ALREADY_INVITED:   'Une invitation est déjà en attente pour cet utilisateur.',
+        };
+        throw new Error(msgs[data.code] ?? data.message ?? 'Erreur lors de l\'invitation.');
       }
 
-      // 2. Vérifier doublon
-      const { data: existing } = await supabase
-        .from('membres_tontine')
-        .select('id, statut')
-        .eq('tontine_id', tontineId)
-        .eq('user_id', profil.id)
-        .maybeSingle();
-
-      if (existing) {
-        throw new Error(`Cet utilisateur est déjà membre (statut : ${existing.statut}).`);
-      }
-
-      // 3. Créer l'invitation
-      const { error } = await supabase
-        .from('membres_tontine')
-        .insert([{
-          tontine_id: tontineId,
-          user_id:    profil.id,
-          role:       'membre',
-          statut:     'invite',
-        }]);
-
-      if (error) throw error;
-
-      // 4. Notification automatique
-      await supabase.from('notifications').insert([{
-        user_id: profil.id,
-        type:    'invitation_tontine',
-        titre:   'Invitation à rejoindre une tontine',
-        message: `Vous avez été invité à rejoindre une tontine. Consultez vos invitations.`,
-        lu:      false,
-      }]);
+      return data;
     },
-    onSuccess: (_, { tontineId }) => {
-      qc.invalidateQueries({ queryKey: [...MEMBRES_KEY, tontineId] });
-      toast.success('Invitation envoyée !');
+
+    onSuccess: (data, { tontineId }) => {
+      qc.invalidateQueries({ queryKey: ['membres_complet', tontineId] });
+      qc.invalidateQueries({ queryKey: ['membres_simple', tontineId] });
+      toast.success(
+        data?.message ?? 'Invitation envoyée !',
+        { duration: 4000, icon: '📩' }
+      );
     },
-    onError: (err: Error) => toast.error(err.message),
+
+    onError: (err: Error) => {
+      toast.error(err.message, { duration: 5000 });
+    },
   });
 }
 
@@ -244,11 +232,9 @@ export function useTontineScore(userId?: string) {
       const malusPenalite = totalDu > 0 ? Math.min((penalites / totalDu) * 100 * 0.2, 20) : 0;
       const bonusCycles   = Math.min(total * 2, 20);
 
-      const score = Math.round(
+      return Math.round(
         Math.max(0, Math.min(100, tauxPaiement + bonusCycles - malusRetard - malusPenalite))
       );
-
-      return score;
     },
   });
 }

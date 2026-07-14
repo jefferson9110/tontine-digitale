@@ -1,178 +1,198 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import type { User, UserRole } from '../types';
+import type { UserRole } from '../types';
 import toast from 'react-hot-toast';
 
-export const ADMIN_KEY = ['admin'] as const;
-export const USERS_KEY = ['users'] as const;
-
-// ── Tous les utilisateurs (admin) ───────────────
-export function useAllUsers() {
-  return useQuery({
-    queryKey: USERS_KEY,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      return data as User[];
-    },
-  });
-}
-
-// ── Stats globales plateforme (admin) ───────────
+// ── Stats Admin ──────────────────────────────────
 export function useStatsAdmin() {
   return useQuery({
-    queryKey: [...ADMIN_KEY, 'stats'],
+    queryKey: ['stats_admin'],
+    staleTime: 1000 * 60 * 5,
     queryFn: async () => {
-      const [tontinesRes, usersRes, cotisationsRes] = await Promise.all([
+      const [t, u, c] = await Promise.all([
         supabase.from('tontines').select('id, statut'),
-        supabase.from('profiles').select('id, created_at'),
+        supabase.from('profiles').select('id, created_at, role_global, is_active'),
         supabase.from('cotisations').select('montant_paye, statut'),
       ]);
 
-      if (tontinesRes.error) throw tontinesRes.error;
-      if (usersRes.error)    throw usersRes.error;
+      const tontines    = t.data ?? [];
+      const users       = u.data ?? [];
+      const cotisations = c.data ?? [];
 
-      const tontines    = tontinesRes.data ?? [];
-      const users       = usersRes.data ?? [];
-      const cotisations = cotisationsRes.data ?? [];
-
-      const unMoisAvant = new Date();
-      unMoisAvant.setMonth(unMoisAvant.getMonth() - 1);
-
-      const nouvellesInscriptions = users.filter(
-        u => new Date(u.created_at) > unMoisAvant
-      ).length;
-
-      const totalPaye  = cotisations.reduce((s, c) => s + (c.montant_paye ?? 0), 0);
-      const enRetard   = cotisations.filter(c => c.statut === 'en_retard').length;
-      const totalCots  = cotisations.length;
-      const tauxParticipation = totalCots > 0
-        ? Math.round((cotisations.filter(c => c.statut === 'payee').length / totalCots) * 100)
-        : 0;
+      const maintenant = new Date();
+      const debutMois  = new Date(maintenant.getFullYear(), maintenant.getMonth(), 1);
 
       return {
-        total_tontines:        tontines.length,
-        tontines_actives:      tontines.filter(t => t.statut === 'active').length,
-        tontines_suspendues:   tontines.filter(t => t.statut === 'suspendue').length,
-        total_utilisateurs:    users.length,
-        nouvelles_inscriptions: nouvellesInscriptions,
-        volume_collecte:       totalPaye,
-        taux_participation:    tauxParticipation,
-        cotisations_retard:    enRetard,
+        total_tontines:         tontines.length,
+        tontines_actives:       tontines.filter(t => t.statut === 'active').length,
+        tontines_suspendues:    tontines.filter(t => t.statut === 'suspendue').length,
+        tontines_terminees:     tontines.filter(t => t.statut === 'terminee').length,
+        total_utilisateurs:     users.length,
+        utilisateurs_actifs:    users.filter(u => u.is_active).length,
+        nouvelles_inscriptions: users.filter(u => new Date(u.created_at) >= debutMois).length,
+        total_organisateurs:    users.filter(u => u.role_global === 'organisateur').length,
+        total_membres:          users.filter(u => u.role_global === 'membre').length,
+        volume_collecte:        cotisations.filter(c => c.statut === 'payee')
+                                  .reduce((s, c) => s + Number(c.montant_paye), 0),
+        cotisations_retard:     cotisations.filter(c => c.statut === 'en_retard').length,
+        taux_participation:     cotisations.length > 0
+          ? Math.round((cotisations.filter(c => c.statut === 'payee').length / cotisations.length) * 100)
+          : 0,
       };
     },
-    staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
 
-// ── Modifier le rôle d'un utilisateur ───────────
-export function useChangerRoleUser() {
-  const qc = useQueryClient();
-
-  return useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: UserRole }) => {
-      const { error } = await supabase
+// ── Tous les utilisateurs ────────────────────────
+export function useAllUsers() {
+  return useQuery({
+    queryKey: ['admin_users'],
+    queryFn: async () => {
+      const { data, error } = await supabase
         .from('profiles')
-        .update({ role_global: role, updated_at: new Date().toISOString() })
-        .eq('id', userId);
-
+        .select('id, nom, prenom, email, role_global, is_active, telephone, created_at')
+        .order('created_at', { ascending: false });
       if (error) throw error;
+      return data ?? [];
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: USERS_KEY });
-      toast.success('Rôle mis à jour.');
-    },
-    onError: (err: Error) => toast.error(err.message),
   });
 }
 
-// ── Activer / désactiver un utilisateur ─────────
-export function useToggleUserActif() {
-  const qc = useQueryClient();
+// ── Toutes les tontines (admin) ──────────────────
+export function useAllTontinesAdmin() {
+  return useQuery({
+    queryKey: ['admin_tontines'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('tontines')
+        .select('id, nom, statut, montant_cotisation, devise, frequence, cycle_actuel, total_cycles, created_at, organisateur_id')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
 
-  return useMutation({
-    mutationFn: async ({ userId, actif }: { userId: string; actif: boolean }) => {
-      const { error } = await supabase
+      // Récupérer les noms d'organisateurs séparément
+      const orgaIds = [...new Set((data ?? []).map(t => t.organisateur_id))];
+      const { data: orgas } = await supabase
         .from('profiles')
-        .update({ is_active: actif, updated_at: new Date().toISOString() })
-        .eq('id', userId);
+        .select('id, nom, prenom')
+        .in('id', orgaIds);
 
-      if (error) throw error;
+      return (data ?? []).map(t => ({
+        ...t,
+        organisateur: orgas?.find(o => o.id === t.organisateur_id) ?? null,
+      }));
     },
-    onSuccess: (_, { actif }) => {
-      qc.invalidateQueries({ queryKey: USERS_KEY });
-      toast.success(actif ? 'Utilisateur réactivé.' : 'Utilisateur désactivé.');
-    },
-    onError: (err: Error) => toast.error(err.message),
   });
 }
 
-// ── Données pour les graphiques (admin rapports) ─
+// ── Données rapports (graphiques par mois) ───────
 export function useRapportsData() {
   return useQuery({
-    queryKey: [...ADMIN_KEY, 'rapports'],
+    queryKey: ['admin_rapports'],
     queryFn: async () => {
       const { data: cotisations, error } = await supabase
         .from('cotisations')
-        .select('montant_paye, created_at, statut')
+        .select('montant_paye, statut, created_at, date_echeance')
         .order('created_at', { ascending: true });
 
       if (error) throw error;
 
       // Grouper par mois
-      const parMois: Record<string, { collecte: number; retards: number; total: number }> = {};
+      const parMois: Record<string, { collecte: number; retards: number; paiements: number }> = {};
 
       (cotisations ?? []).forEach(c => {
-        const mois = c.created_at.slice(0, 7); // YYYY-MM
-        if (!parMois[mois]) parMois[mois] = { collecte: 0, retards: 0, total: 0 };
-        parMois[mois].collecte += c.montant_paye;
-        parMois[mois].total   += 1;
-        if (c.statut === 'en_retard') parMois[mois].retards += 1;
+        const d = new Date(c.created_at);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const label = d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+
+        if (!parMois[key]) parMois[key] = { collecte: 0, retards: 0, paiements: 0 };
+        if (c.statut === 'payee')      parMois[key].collecte   += Number(c.montant_paye);
+        if (c.statut === 'en_retard') parMois[key].retards    += 1;
+        if (c.statut === 'payee')     parMois[key].paiements  += 1;
       });
 
       return Object.entries(parMois)
-        .slice(-7) // 7 derniers mois
-        .map(([mois, vals]) => ({
-          mois:     new Date(mois + '-01').toLocaleDateString('fr-FR', { month: 'short' }),
-          collecte: vals.collecte,
-          retards:  vals.retards,
-          total:    vals.total,
-        }));
+        .sort(([a], [b]) => a.localeCompare(b))
+        .slice(-12)
+        .map(([key, vals]) => {
+          const [year, month] = key.split('-');
+          const d = new Date(Number(year), Number(month) - 1);
+          return {
+            mois: d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }),
+            ...vals,
+          };
+        });
     },
   });
 }
 
-// ── Profil d'un utilisateur (admin) ─────────────
-export function useUserDetail(userId?: string) {
-  return useQuery({
-    queryKey: [...USERS_KEY, userId],
-    enabled: !!userId,
-    queryFn: async () => {
-      const [profileRes, membershipsRes, cotisationsRes] = await Promise.all([
-        supabase.from('profiles').select('*').eq('id', userId!).single(),
-        supabase.from('membres_tontine').select('tontine_id').eq('user_id', userId!),
-        supabase.from('cotisations').select('statut, penalite').eq('user_id', userId!),
-      ]);
-
-      if (profileRes.error) throw profileRes.error;
-
-      const cotisations   = cotisationsRes.data ?? [];
-      const total         = cotisations.length;
-      const payees        = cotisations.filter(c => c.statut === 'payee').length;
-      const penalites     = cotisations.reduce((s, c) => s + (c.penalite ?? 0), 0);
-      const score = total > 0
-        ? Math.max(0, Math.min(100, Math.round((payees / total) * 80 + (penalites === 0 ? 20 : 0))))
-        : 50;
-
-      return {
-        ...profileRes.data as User,
-        tontines_count: membershipsRes.data?.length ?? 0,
-        score,
-      };
+// ── Changer rôle utilisateur ─────────────────────
+export function useChangerRoleUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ userId, role }: { userId: string; role: UserRole }) => {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ role_global: role })
+        .eq('id', userId);
+      if (error) throw error;
     },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin_users'] });
+      toast.success('Rôle mis à jour.');
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+}
+
+// ── Activer / Désactiver utilisateur ─────────────
+export function useToggleUserActif() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ userId, actif }: { userId: string; actif: boolean }) => {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ is_active: actif })
+        .eq('id', userId);
+      if (error) throw error;
+    },
+    onSuccess: (_, { actif }) => {
+      qc.invalidateQueries({ queryKey: ['admin_users'] });
+      toast.success(actif ? 'Compte réactivé.' : 'Compte désactivé.');
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+}
+
+// ── Supprimer / suspendre tontine (admin) ────────
+export function useChangerStatutTontineAdmin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, statut }: { id: string; statut: string }) => {
+      const { error } = await supabase
+        .from('tontines')
+        .update({ statut })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin_tontines'] });
+      toast.success('Statut mis à jour.');
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+}
+
+export function useDeleteTontineAdmin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('tontines').delete().eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin_tontines'] });
+      toast.success('Tontine supprimée.');
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 }

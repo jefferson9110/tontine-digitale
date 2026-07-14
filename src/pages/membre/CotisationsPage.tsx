@@ -1,293 +1,284 @@
+// ════════════════════════════════════════════════
+//  CotisationsPage — Version complète avec
+//  paiement Mobile Money intégré
+//  Remplace src/pages/membre/CotisationsPage.tsx
+// ════════════════════════════════════════════════
+
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  RiMoneyDollarCircleLine, RiSearchLine, RiCheckLine,
-  RiTimeLine, RiAlertLine, RiDownloadLine, RiCalendarLine,
-  RiLoader4Line, RiInboxLine, RiArrowUpLine, RiArrowDownLine,
+  RiMoneyDollarCircleLine, RiCheckDoubleLine, RiTimeLine,
+  RiAlertLine, RiCalendarLine, RiLoader4Line, RiInboxLine,
+  RiSmartphoneLine, RiHistoryLine, RiFilterLine,
 } from 'react-icons/ri';
-import { useAuth }                                        from '../../contexts/AuthContext';
-import { useCotisations, useMesCotisations,
-         useValiderCotisation, useResumeCotisations }     from '../../hooks/useCotisations';
-import { formatMontant, formatDate, getStatutColor, getStatutLabel, cn } from '../../lib/utils';
-import type { Cotisation } from '../../types';
-import toast from 'react-hot-toast';
+import { useAuth }                    from '../../contexts/AuthContext';
+import { useQuery }                   from '@tanstack/react-query';
+import { supabase }                   from '../../lib/supabase';
+import { ModalPaiementMobileMoney,
+         HistoriqueTransactions }      from '../../components/shared/MobileMoney';
+import { formatMontant, formatDate,
+         getStatutColor, getStatutLabel, cn } from '../../lib/utils';
 
-type FilterStatut = 'tous' | 'payee' | 'en_attente' | 'en_retard' | 'partiellement_payee';
-type SortField    = 'date_echeance' | 'montant_du';
-type SortDir      = 'asc' | 'desc';
+type Onglet  = 'cotisations' | 'historique';
+type Filtre  = 'toutes' | 'en_attente' | 'payee' | 'en_retard';
 
-// ── Modal validation ─────────────────────────────
-function ModalValidation({
-  cotisation, validePar, onClose,
-}: {
-  cotisation: Cotisation & { user?: any; tontine?: any };
-  validePar:  string;
-  onClose:    () => void;
-}) {
-  const [reference, setReference] = useState('');
-  const valider = useValiderCotisation();
+function useMesCotisations(userId?: string) {
+  return useQuery({
+    queryKey: ['mes_cotisations_full', userId],
+    enabled: !!userId,
+    queryFn: async () => {
+      if (!userId) return [];
 
-  async function handle() {
-    await valider.mutateAsync({
-      cotisationId: cotisation.id,
-      montantPaye:  cotisation.montant_du + cotisation.penalite,
-      reference:    reference || undefined,
-      validePar,
-    });
-    onClose();
-  }
+      const { data, error } = await supabase
+        .from('cotisations')
+        .select('id, tontine_id, cycle_numero, montant_du, montant_paye, penalite, statut, date_echeance, date_paiement, reference')
+        .eq('user_id', userId)
+        .order('date_echeance', { ascending: false });
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-slide-up">
-        <div className="p-6 border-b border-gray-100">
-          <h2 className="font-display font-bold text-gray-900 text-lg">Valider la cotisation</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            {cotisation.user?.prenom} {cotisation.user?.nom}
-          </p>
-        </div>
-        <div className="p-6 space-y-4">
-          <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Montant dû</span>
-              <span className="font-bold text-gray-800">{formatMontant(cotisation.montant_du)}</span>
-            </div>
-            {cotisation.penalite > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-red-500">Pénalité</span>
-                <span className="font-bold text-red-600">+{formatMontant(cotisation.penalite)}</span>
-              </div>
-            )}
-            <div className="flex justify-between text-sm font-semibold border-t border-gray-200 pt-2">
-              <span className="text-gray-700">Total</span>
-              <span className="text-primary-700">{formatMontant(cotisation.montant_du + cotisation.penalite)}</span>
-            </div>
-          </div>
-          <div>
-            <label className="label">Référence de paiement</label>
-            <input type="text" placeholder="Ex: MTN-20260706-001"
-              value={reference} onChange={e => setReference(e.target.value)} className="input" />
-            <p className="text-xs text-gray-400 mt-1">Numéro de transaction Mobile Money</p>
-          </div>
-        </div>
-        <div className="p-6 border-t border-gray-100 flex gap-3">
-          <button onClick={onClose} className="btn-outline flex-1">Annuler</button>
-          <button onClick={handle} disabled={valider.isPending} className="btn-primary flex-1">
-            {valider.isPending ? <RiLoader4Line className="w-4 h-4 animate-spin" /> : <RiCheckLine className="w-4 h-4" />}
-            Confirmer
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+      if (error || !data) return [];
+
+      // Récupérer les noms de tontines séparément
+      const tontineIds = [...new Set(data.map(c => c.tontine_id))];
+      const { data: tontines } = await supabase
+        .from('tontines')
+        .select('id, nom, devise, montant_cotisation')
+        .in('id', tontineIds);
+
+      return data.map(c => ({
+        ...c,
+        tontine: tontines?.find(t => t.id === c.tontine_id) ?? null,
+      }));
+    },
+  });
 }
 
-// ── Résumé ───────────────────────────────────────
-function Resume({ tontineId }: { tontineId?: string }) {
-  const { data } = useResumeCotisations(tontineId);
-  if (!data) return null;
-
-  return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      {[
-        { label: 'Total dû',     val: formatMontant(data.total_du),     icon: RiMoneyDollarCircleLine, cls: 'bg-gray-100 text-gray-700' },
-        { label: 'Total payé',   val: formatMontant(data.total_paye),   icon: RiCheckLine,             cls: 'bg-green-100 text-green-700' },
-        { label: 'En retard',    val: `${data.en_retard} cotisation${data.en_retard > 1 ? 's' : ''}`, icon: RiAlertLine, cls: 'bg-red-100 text-red-700' },
-        { label: 'En attente',   val: `${data.en_attente} cotisation${data.en_attente > 1 ? 's' : ''}`, icon: RiTimeLine, cls: 'bg-amber-100 text-amber-700' },
-      ].map(({ label, val, icon: Icon, cls }) => (
-        <div key={label} className="stat-card">
-          <div className={`stat-icon ${cls}`}><Icon className="w-5 h-5" /></div>
-          <div>
-            <p className="text-xs text-gray-400 font-medium">{label}</p>
-            <p className="font-display font-bold text-gray-900 text-base leading-tight mt-0.5">{val}</p>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── Page principale ──────────────────────────────
 export function CotisationsPage() {
   const { profile } = useAuth();
-  const isOrga = profile?.role_global === 'organisateur' || profile?.role_global === 'admin';
+  const { data: cotisations = [], isLoading, refetch } = useMesCotisations(profile?.id);
 
-  // Pour l'orga → toutes les cotisations de ses tontines
-  // Pour le membre → ses propres cotisations
-  const { data: mesCots = [],  isLoading: loadingMembre } = useMesCotisations(
-    !isOrga ? profile?.id : undefined
+  const [onglet,    setOnglet]    = useState<Onglet>('cotisations');
+  const [filtre,    setFiltre]    = useState<Filtre>('toutes');
+  const [paiement,  setPaiement]  = useState<{
+    cotisationId: string;
+    tontineId:    string;
+    montant:      number;
+    devise:       string;
+  } | null>(null);
+
+  // Calculs stats
+  const totalDu       = cotisations.filter(c => c.statut !== 'payee').reduce((s, c) => s + Number(c.montant_du), 0);
+  const totalPaye     = cotisations.filter(c => c.statut === 'payee').reduce((s, c) => s + Number(c.montant_paye), 0);
+  const enRetard      = cotisations.filter(c => c.statut === 'en_retard').length;
+  const enAttente     = cotisations.filter(c => c.statut === 'en_attente').length;
+
+  const cotisationsFiltrees = cotisations.filter(c =>
+    filtre === 'toutes' || c.statut === filtre
   );
 
-  const [search,       setSearch]       = useState('');
-  const [filterStatut, setFilterStatut] = useState<FilterStatut>('tous');
-  const [sortField,    setSortField]    = useState<SortField>('date_echeance');
-  const [sortDir,      setSortDir]      = useState<SortDir>('desc');
-  const [selected,     setSelected]     = useState<typeof mesCots[0] | null>(null);
-
-  function toggleSort(field: SortField) {
-    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortField(field); setSortDir('desc'); }
-  }
-
-  function SortIcon({ field }: { field: SortField }) {
-    if (sortField !== field) return <RiArrowUpLine className="w-3 h-3 text-gray-300" />;
-    return sortDir === 'asc'
-      ? <RiArrowUpLine className="w-3 h-3 text-primary-600" />
-      : <RiArrowDownLine className="w-3 h-3 text-primary-600" />;
-  }
-
-  const cotisations = mesCots
-    .filter(c => {
-      const tontineNom = (c as any).tontine?.nom ?? '';
-      const matchSearch =
-        tontineNom.toLowerCase().includes(search.toLowerCase()) ||
-        (c.reference ?? '').toLowerCase().includes(search.toLowerCase());
-      const matchStatut = filterStatut === 'tous' || c.statut === filterStatut;
-      return matchSearch && matchStatut;
-    })
-    .sort((a, b) => {
-      const va = sortField === 'date_echeance' ? a.date_echeance : String(a.montant_du);
-      const vb = sortField === 'date_echeance' ? b.date_echeance : String(b.montant_du);
-      return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
-    });
-
-  function exportCSV() {
-    const headers = ['Tontine', 'Cycle', 'Montant dû', 'Payé', 'Pénalité', 'Statut', 'Échéance', 'Référence'];
-    const rows = cotisations.map(c => [
-      (c as any).tontine?.nom ?? '—', c.cycle_numero,
-      c.montant_du, c.montant_paye, c.penalite,
-      getStatutLabel(c.statut), c.date_echeance, c.reference ?? '',
-    ]);
-    const csv  = [headers, ...rows].map(r => r.join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a'); a.href = url;
-    a.download = `cotisations_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click(); URL.revokeObjectURL(url);
-  }
-
-  const FILTRES: { key: FilterStatut; label: string }[] = [
-    { key: 'tous',                label: 'Toutes' },
-    { key: 'payee',               label: 'Payées' },
-    { key: 'en_attente',         label: 'En attente' },
-    { key: 'en_retard',          label: 'En retard' },
-    { key: 'partiellement_payee', label: 'Partielles' },
+  const FILTRES: { key: Filtre; label: string }[] = [
+    { key: 'toutes',     label: `Toutes (${cotisations.length})` },
+    { key: 'en_attente', label: `À payer (${enAttente})` },
+    { key: 'en_retard',  label: `En retard (${enRetard})` },
+    { key: 'payee',      label: `Payées (${cotisations.filter(c => c.statut === 'payee').length})` },
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="page-header !mb-0">
-          <h1 className="page-title">Cotisations</h1>
-          <p className="page-subtitle">{cotisations.length} cotisation{cotisations.length > 1 ? 's' : ''}</p>
+    <div className="space-y-5">
+      <div className="page-header">
+        <h1 className="page-title">Mes cotisations</h1>
+        <p className="page-subtitle">Gérez vos paiements Mobile Money</p>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="stat-card">
+          <div className="stat-icon bg-amber-100 text-amber-700"><RiTimeLine className="w-5 h-5" /></div>
+          <div>
+            <p className="text-xs text-gray-400">Reste à payer</p>
+            <p className="text-xl font-display font-bold text-amber-700">{formatMontant(totalDu)}</p>
+          </div>
         </div>
-        <button onClick={exportCSV} className="btn-outline flex-shrink-0">
-          <RiDownloadLine className="w-4 h-4" /> Exporter CSV
-        </button>
+        <div className="stat-card">
+          <div className="stat-icon bg-green-100 text-green-700"><RiCheckDoubleLine className="w-5 h-5" /></div>
+          <div>
+            <p className="text-xs text-gray-400">Total payé</p>
+            <p className="text-xl font-display font-bold text-green-700">{formatMontant(totalPaye)}</p>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon bg-red-100 text-red-700"><RiAlertLine className="w-5 h-5" /></div>
+          <div>
+            <p className="text-xs text-gray-400">En retard</p>
+            <p className="text-xl font-display font-bold text-red-700">{enRetard}</p>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon bg-primary-100 text-primary-700"><RiCalendarLine className="w-5 h-5" /></div>
+          <div>
+            <p className="text-xs text-gray-400">En attente</p>
+            <p className="text-xl font-display font-bold text-primary-700">{enAttente}</p>
+          </div>
+        </div>
       </div>
 
-      <Resume />
-
-      <div className="relative">
-        <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-        <input type="search" placeholder="Rechercher par tontine ou référence…"
-          value={search} onChange={e => setSearch(e.target.value)} className="input pl-9" />
-      </div>
-
-      <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-        {FILTRES.map(({ key, label }) => (
-          <button key={key} onClick={() => setFilterStatut(key)}
-            className={cn('px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border',
-              filterStatut === key
-                ? 'bg-primary-600 text-white border-primary-600'
-                : 'bg-white text-gray-500 border-gray-200 hover:border-primary-300 hover:text-primary-600'
-            )}>{label}
+      {/* Onglets */}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+        {[
+          { key: 'cotisations', label: 'Mes cotisations', icon: RiMoneyDollarCircleLine },
+          { key: 'historique',  label: 'Historique Mobile Money', icon: RiHistoryLine },
+        ].map(({ key, label, icon: Icon }) => (
+          <button key={key} onClick={() => setOnglet(key as Onglet)}
+            className={cn('flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all',
+              onglet === key ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            )}>
+            <Icon className="w-4 h-4" />{label}
           </button>
         ))}
       </div>
 
-      {loadingMembre ? (
-        <div className="flex items-center justify-center h-40">
-          <RiLoader4Line className="w-8 h-8 text-primary-500 animate-spin" />
-        </div>
-      ) : cotisations.length === 0 ? (
-        <div className="empty-state">
-          <RiInboxLine className="empty-state-icon" />
-          <p className="font-semibold text-gray-500">Aucune cotisation trouvée</p>
-        </div>
-      ) : (
-        <div className="card !p-0 overflow-hidden">
-          <div className="table-wrapper">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Tontine</th>
-                  <th>Cycle</th>
-                  <th>
-                    <button onClick={() => toggleSort('montant_du')} className="flex items-center gap-1 hover:text-primary-600">
-                      Montant <SortIcon field="montant_du" />
-                    </button>
-                  </th>
-                  <th>Pénalité</th>
-                  <th>Statut</th>
-                  <th>
-                    <button onClick={() => toggleSort('date_echeance')} className="flex items-center gap-1 hover:text-primary-600">
-                      Échéance <SortIcon field="date_echeance" />
-                    </button>
-                  </th>
-                  <th>Référence</th>
-                  {isOrga && <th>Action</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {cotisations.map(c => (
-                  <tr key={c.id}>
-                    <td className="font-medium text-gray-700 text-xs">{(c as any).tontine?.nom ?? '—'}</td>
-                    <td><span className="badge-gray">#{c.cycle_numero}</span></td>
-                    <td className="font-mono font-semibold text-gray-800">{formatMontant(c.montant_du)}</td>
-                    <td>
-                      {c.penalite > 0
-                        ? <span className="text-red-600 font-medium text-xs">+{formatMontant(c.penalite)}</span>
-                        : <span className="text-gray-300">—</span>
-                      }
-                    </td>
-                    <td><span className={cn('badge', getStatutColor(c.statut))}>{getStatutLabel(c.statut)}</span></td>
-                    <td>
-                      <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                        <RiCalendarLine className="w-3.5 h-3.5" />
-                        {formatDate(c.date_echeance)}
-                      </div>
-                    </td>
-                    <td>
-                      {c.reference
-                        ? <span className="font-mono text-xs text-gray-500">{c.reference}</span>
-                        : <span className="text-gray-300 text-xs">—</span>
-                      }
-                    </td>
-                    {isOrga && (
-                      <td>
-                        {(c.statut === 'en_attente' || c.statut === 'en_retard' || c.statut === 'partiellement_payee') && (
-                          <button onClick={() => setSelected(c)} className="btn-primary btn-sm">Valider</button>
-                        )}
-                        {c.statut === 'payee' && (
-                          <span className="flex items-center gap-1 text-green-600 text-xs">
-                            <RiCheckLine className="w-3.5 h-3.5" /> Validé
-                          </span>
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* Onglet cotisations */}
+      {onglet === 'cotisations' && (
+        <div className="space-y-4 animate-fade-in">
+          {/* Filtres */}
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            {FILTRES.map(({ key, label }) => (
+              <button key={key} onClick={() => setFiltre(key)}
+                className={cn('px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border',
+                  filtre === key
+                    ? 'bg-primary-600 text-white border-primary-600'
+                    : 'bg-white text-gray-500 border-gray-200 hover:border-primary-300'
+                )}>
+                {label}
+              </button>
+            ))}
           </div>
+
+          {isLoading ? (
+            <div className="flex items-center justify-center h-40">
+              <RiLoader4Line className="w-8 h-8 text-primary-500 animate-spin" />
+            </div>
+          ) : cotisationsFiltrees.length === 0 ? (
+            <div className="card text-center py-12">
+              <RiInboxLine className="w-12 h-12 text-gray-200 mx-auto mb-3" />
+              <p className="font-semibold text-gray-500">Aucune cotisation trouvée</p>
+              {filtre === 'toutes' && (
+                <p className="text-sm text-gray-400 mt-1 mb-4">
+                  Rejoignez une tontine pour commencer à cotiser.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {cotisationsFiltrees.map(c => {
+                const tontine  = c.tontine as any;
+                const montantTotal = Number(c.montant_du) + Number(c.penalite);
+                const peutPayer = c.statut === 'en_attente' || c.statut === 'en_retard';
+
+                return (
+                  <div key={c.id} className={cn('card',
+                    c.statut === 'en_retard' && 'border-2 border-red-200',
+                    c.statut === 'payee' && 'opacity-80'
+                  )}>
+                    <div className="flex items-start gap-4">
+                      {/* Icône statut */}
+                      <div className={cn('w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0',
+                        c.statut === 'payee'     ? 'bg-green-100' :
+                        c.statut === 'en_retard' ? 'bg-red-100' : 'bg-amber-100'
+                      )}>
+                        {c.statut === 'payee'
+                          ? <RiCheckDoubleLine className="w-6 h-6 text-green-600" />
+                          : c.statut === 'en_retard'
+                          ? <RiAlertLine className="w-6 h-6 text-red-600" />
+                          : <RiTimeLine className="w-6 h-6 text-amber-600" />}
+                      </div>
+
+                      {/* Infos */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="font-semibold text-gray-800 text-sm">
+                              {tontine?.nom ?? 'Tontine'} — Cycle {c.cycle_numero}
+                            </p>
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              Échéance : {formatDate(c.date_echeance)}
+                            </p>
+                          </div>
+                          <span className={cn('badge flex-shrink-0', getStatutColor(c.statut))}>
+                            {getStatutLabel(c.statut)}
+                          </span>
+                        </div>
+
+                        {/* Montants */}
+                        <div className="mt-3 bg-gray-50 rounded-xl px-3 py-2 flex items-center justify-between">
+                          <div>
+                            <p className="text-xs text-gray-400">
+                              {c.statut === 'payee' ? 'Payé le' : 'À payer'}
+                            </p>
+                            <p className="font-display font-bold text-gray-900 text-lg">
+                              {formatMontant(montantTotal, tontine?.devise)}
+                            </p>
+                            {Number(c.penalite) > 0 && (
+                              <p className="text-xs text-red-500">
+                                dont {formatMontant(Number(c.penalite))} de pénalité
+                              </p>
+                            )}
+                          </div>
+                          {c.statut === 'payee' && c.reference && (
+                            <div className="text-right">
+                              <p className="text-xs text-gray-400">Référence</p>
+                              <p className="font-mono text-xs text-gray-600">{c.reference}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Bouton payer */}
+                        {peutPayer && (
+                          <button
+                            onClick={() => setPaiement({
+                              cotisationId: c.id,
+                              tontineId:    c.tontine_id,
+                              montant:      montantTotal,
+                              devise:       tontine?.devise ?? 'XAF',
+                            })}
+                            className="btn-primary w-full justify-center mt-3"
+                          >
+                            <RiSmartphoneLine className="w-4 h-4" />
+                            Payer via Mobile Money
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
-      {selected && profile && (
-        <ModalValidation
-          cotisation={selected}
-          validePar={profile.id}
-          onClose={() => setSelected(null)}
+      {/* Onglet historique */}
+      {onglet === 'historique' && profile && (
+        <div className="card animate-fade-in">
+          <h2 className="font-display font-bold text-gray-900 text-base mb-4">
+            Transactions Mobile Money
+          </h2>
+          <HistoriqueTransactions userId={profile.id} />
+        </div>
+      )}
+
+      {/* Modal paiement */}
+      {paiement && (
+        <ModalPaiementMobileMoney
+          cotisationId={paiement.cotisationId}
+          tontineId={paiement.tontineId}
+          montant={paiement.montant}
+          devise={paiement.devise}
+          type="depot"
+          onClose={() => setPaiement(null)}
+          onSuccess={() => {
+            setPaiement(null);
+            refetch();
+          }}
         />
       )}
     </div>
