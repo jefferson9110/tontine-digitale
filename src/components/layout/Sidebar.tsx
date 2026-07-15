@@ -1,16 +1,10 @@
-// ════════════════════════════════════════════════
-//  Sidebar.tsx — Version dark style
-//  Sidebar sombre avec sections groupées
-//  Inspiré de l'image RDVPro
-// ════════════════════════════════════════════════
-
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   RiDashboardLine, RiGroupLine, RiMoneyDollarCircleLine,
   RiBellLine, RiFileChartLine, RiChat4Line, RiSettings3Line,
   RiLogoutBoxLine, RiCloseLine, RiAddCircleLine, RiStarLine,
   RiWalletLine, RiTrophyLine, RiShieldCheckLine,
-  RiStackLine, RiUserLine, RiBarChartLine,
+  RiStackLine, RiUserLine, RiBarChartLine, RiCalendarEventLine,
 } from 'react-icons/ri';
 import { useAuth }         from '../../contexts/AuthContext';
 import { useTontineScore,
@@ -18,6 +12,7 @@ import { useTontineScore,
 import { useNotifications } from '../../hooks/useNotifications';
 import { cn, getInitiales } from '../../lib/utils';
 import toast from 'react-hot-toast';
+
 
 interface Props { onClose?: () => void; }
 
@@ -38,6 +33,7 @@ const NAV_MEMBRE = [
       { to: '/beneficiaires', icon: RiTrophyLine,            label: 'Bénéficiaires' },
       { to: '/messages',      icon: RiChat4Line,             label: 'Messages' },
       { to: '/notifications', icon: RiBellLine,              label: 'Notifications', badge: true },
+      { to: '/calendrier',    icon: RiCalendarEventLine,     label: 'Calendrier' },
     ],
   },
   {
@@ -64,6 +60,7 @@ const NAV_ORGA = [
       { to: '/cotisations',   icon: RiMoneyDollarCircleLine, label: 'Cotisations' },
       { to: '/beneficiaires', icon: RiTrophyLine,            label: 'Bénéficiaires' },
       { to: '/messages',      icon: RiChat4Line,             label: 'Messages' },
+      { to: '/calendrier',    icon: RiCalendarEventLine,     label: 'Calendrier' },
       { to: '/notifications', icon: RiBellLine,              label: 'Notifications', badge: true },
     ],
   },
@@ -82,6 +79,7 @@ const NAV_ADMIN = [
     items: [
       { to: '/admin/dashboard',    icon: RiDashboardLine,  label: 'Dashboard' },
       { to: '/admin/tontines',     icon: RiStackLine,      label: 'Tontines' },
+      { to: '/messages',      icon: RiChat4Line,             label: 'Messages' },
       { to: '/admin/utilisateurs', icon: RiGroupLine,      label: 'Utilisateurs' },
       { to: '/admin/rapports',     icon: RiBarChartLine,   label: 'Rapports' },
     ],
@@ -114,7 +112,7 @@ export function Sidebar({ onClose }: Props) {
 
   async function handleSignOut() {
     await signOut();
-    toast.success('À bientôt !');
+    toast.success('À bientôt et à la prochaine !');
     navigate('/login');
   }
 
@@ -142,22 +140,6 @@ export function Sidebar({ onClose }: Props) {
           </button>
         )}
       </div>
-
-      {/* CTA créer tontine */}
-      {peutCreer && (
-        <div className="px-4 pt-4 pb-2">
-          <button
-            onClick={() => { navigate('/tontines/creer'); onClose?.(); }}
-            className="w-full flex items-center justify-center gap-2 py-2.5 px-4
-                       bg-primary-500 hover:bg-primary-400 text-white
-                       rounded-xl text-sm font-semibold transition-colors
-                       shadow-lg shadow-primary-500/20"
-          >
-            <RiAddCircleLine className="w-4 h-4" />
-            Créer une tontine
-          </button>
-        </div>
-      )}
 
       {/* Navigation par sections */}
       <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-5 scrollbar-hide">

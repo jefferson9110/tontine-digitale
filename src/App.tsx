@@ -26,6 +26,7 @@ import { MessagesPage }      from './pages/membre/MessagesPage';
 import { NotificationsPage } from './pages/membre/NotificationsPage';
 import { ParametresPage }    from './pages/membre/ParametresPage';
 import { PaiementPage } from './pages/membre/PaiementPage';
+import { CalendrierPage } from './pages/membre/CalendrierPage';
 
 
 // Pages admin
@@ -73,8 +74,9 @@ export default function App() {
                   <Route path="/beneficiaires"         element={<BeneficiairesPage />} />
                   <Route path="/messages"              element={<MessagesPage />} />
                   <Route path="/notifications"         element={<NotificationsPage />} />
-                  <Route path="/paiements" element={<PaiementPage />} />
+                  <Route path="/paiements"             element={<PaiementPage />} />
                   <Route path="/parametres"            element={<ParametresPage />} />
+                  <Route path="/calendrier"            element={<CalendrierPage />} />
                 </Route>
               </Route>
 

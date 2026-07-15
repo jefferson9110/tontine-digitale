@@ -1,11 +1,3 @@
-// ════════════════════════════════════════════════
-//  RejoindreViaLienPage.tsx
-//  Route : /invitation/:token
-//  Accessible SANS connexion
-//  Si non inscrit → redirige vers Register avec
-//  le token conservé, puis revient ici après
-// ════════════════════════════════════════════════
-
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
