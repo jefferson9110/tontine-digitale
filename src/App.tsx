@@ -27,6 +27,7 @@ import { NotificationsPage } from './pages/membre/NotificationsPage';
 import { ParametresPage }    from './pages/membre/ParametresPage';
 import { PaiementPage } from './pages/membre/PaiementPage';
 import { CalendrierPage } from './pages/membre/CalendrierPage';
+import { TontineScorePage } from './pages/membre/TontineScorePage';
 
 
 // Pages admin
@@ -77,6 +78,7 @@ export default function App() {
                   <Route path="/paiements"             element={<PaiementPage />} />
                   <Route path="/parametres"            element={<ParametresPage />} />
                   <Route path="/calendrier"            element={<CalendrierPage />} />
+                  <Route path="/score"        element={<TontineScorePage />} />
                 </Route>
               </Route>
 
