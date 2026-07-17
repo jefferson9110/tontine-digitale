@@ -1,16 +1,14 @@
-// ════════════════════════════════════════════════
-//  AdminLayout.tsx — Version 2
-//  Layout admin avec sidebar sombre + header v2
-// ════════════════════════════════════════════════
-
 import { useState } from 'react';
-import { Outlet }   from 'react-router-dom';
-import { Sidebar }  from './Sidebar';
-import { Header }   from './Header';
-import { cn }       from '../../lib/utils';
+import { Outlet } from 'react-router-dom';
+import { Sidebar } from './Sidebar';
+import { Header } from './Header';
+import { cn } from '../../lib/utils';
+ 
 
 export function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [nbNonLues, setNbNonLues] = useState<number>(0);
+  const [notifs, setNotifs] = useState<any[]>([]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-slate-950 transition-colors duration-200">
@@ -32,8 +30,11 @@ export function AdminLayout() {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <Header setSidebarOpen={setSidebarOpen} />
-
+        <Header
+          setSidebarOpen={setSidebarOpen}
+          nbNonLues={nbNonLues}
+          notifs={notifs}
+        />
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-7xl mx-auto px-4 md:px-6 py-6">
             <Outlet />
