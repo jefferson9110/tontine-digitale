@@ -106,11 +106,7 @@ export function RejoindreViaLienPage() {
     navigate(`/login?redirect=/invitation/${token}`);
   }
 
-  // ════════════════════════════════════════════════
-  //  ÉTATS D'AFFICHAGE
-  // ════════════════════════════════════════════════
 
-  // Chargement
   if (state === 'loading') return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4">
       <div className="w-12 h-12 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
@@ -118,7 +114,7 @@ export function RejoindreViaLienPage() {
     </div>
   );
 
-  // Lien invalide
+ 
   if (state === 'invalide') return (
     <CentreMessage
       icon={<RiErrorWarningLine className="w-10 h-10 text-red-500" />}
