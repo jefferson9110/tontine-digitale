@@ -82,6 +82,7 @@ const NAV_ADMIN = [
       { to: '/messages',      icon: RiChat4Line,             label: 'Messages' },
       { to: '/admin/utilisateurs', icon: RiGroupLine,      label: 'Utilisateurs' },
       { to: '/admin/rapports',     icon: RiBarChartLine,   label: 'Rapports' },
+      { to: '/notifications', icon: RiBellLine,              label: 'Notifications', badge: true },
     ],
   },
   {
