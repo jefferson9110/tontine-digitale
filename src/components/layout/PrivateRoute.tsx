@@ -33,7 +33,14 @@ export function PublicRoute() {
   if (loading) return <LoadingScreen />;
 
   if (session && profile) {
-    // Redirection selon le rôle
+    // Priorité à une invitation en attente (lien rejoint avant inscription/connexion)
+    const pendingToken = sessionStorage.getItem('invitation_token_pending');
+    if (pendingToken) {
+      sessionStorage.removeItem('invitation_token_pending');
+      return <Navigate to={`/invitation/${pendingToken}`} replace />;
+    }
+
+    // Sinon, redirection selon le rôle
     const destination =
       profile.role_global === 'admin' ? '/admin/dashboard' : '/dashboard';
     return <Navigate to={destination} replace />;

@@ -12,7 +12,6 @@ import { AdminLayout } from './components/layout/AdminLayout';
 import { LandingPage }  from './pages/public/LandingPage';
 import { LoginPage }    from './pages/auth/LoginPage';
 import { RegisterPage } from './pages/auth/RegisterPage';
-import { RejoindreInvitationPage } from './pages/public/RejoindreInvitationPage';
 import { RejoindreViaLienPage } from './pages/public/RejoindreViaLienPage';
 
 // Pages utilisateur
@@ -61,8 +60,10 @@ export default function App() {
               </Route>
 
               {/* Route d'invitation (accessible sans auth) */}
-              <Route path="/rejoindre/:token" element={<RejoindreInvitationPage />} />
               <Route path="/invitation/:token" element={<RejoindreViaLienPage />} />
+              {/* Ancienne route (Système A, abandonnée). Aucun lien valide n'a jamais pu
+                  être généré via /rejoindre (bug de génération connu) : redirection simple. */}
+              <Route path="/rejoindre/:token" element={<Navigate to="/" replace />} />
 
               {/* ── Routes utilisateur protégées ── */}
               <Route element={<PrivateRoute />}>

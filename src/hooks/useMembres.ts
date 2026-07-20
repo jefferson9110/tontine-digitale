@@ -93,44 +93,6 @@ export function useInviterMembre() {
   });
 }
 
-// ── Rejoindre via lien ──────────────────────────
-export function useRejoindreViaLien() {
-  const qc = useQueryClient();
-
-  return useMutation({
-    mutationFn: async ({
-      tontineId,
-      userId,
-    }: { tontineId: string; userId: string }) => {
-      // Vérifier si déjà membre
-      const { data: existing } = await supabase
-        .from('membres_tontine')
-        .select('id')
-        .eq('tontine_id', tontineId)
-        .eq('user_id', userId)
-        .maybeSingle();
-
-      if (existing) throw new Error('Vous êtes déjà membre de cette tontine.');
-
-      const { error } = await supabase
-        .from('membres_tontine')
-        .insert([{
-          tontine_id: tontineId,
-          user_id:    userId,
-          role:       'membre',
-          statut:     'en_attente',
-        }]);
-
-      if (error) throw error;
-    },
-    onSuccess: (_, { tontineId }) => {
-      qc.invalidateQueries({ queryKey: [...MEMBRES_KEY, tontineId] });
-      toast.success('Demande envoyée ! En attente de validation.');
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-}
-
 // ── Valider/Refuser une demande d'adhésion ──────
 export function useValiderAdhesion() {
   const qc = useQueryClient();

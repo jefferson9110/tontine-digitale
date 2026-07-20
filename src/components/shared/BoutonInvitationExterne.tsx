@@ -41,7 +41,8 @@ export function BoutonInvitationExterne({ tontineId, tontineNom }: Props) {
       if (error) throw error;
       if (!data.success) throw new Error(data.message);
 
-      const url = `${window.location.origin}/invitation/${data.token}`;
+      const baseUrl = (import.meta.env.VITE_APP_URL as string | undefined) || window.location.origin;
+      const url = `${baseUrl}/invitation/${data.token}`;
       setLien(url);
       setShow(true);
     } catch (err: any) {

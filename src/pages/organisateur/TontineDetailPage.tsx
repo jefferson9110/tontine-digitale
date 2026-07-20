@@ -97,7 +97,7 @@ function OngletApercu({ tontine }: { tontine: any }) {
 }
 
 // ── Onglet Membres ───────────────────────────────
-function OngletMembres({ tontineId, isOrga }: { tontineId: string; isOrga: boolean }) {
+function OngletMembres({ tontineId, tontineNom, isOrga }: { tontineId: string; tontineNom: string; isOrga: boolean }) {
   const { profile } = useAuth();
   const qc = useQueryClient();
 
@@ -131,13 +131,7 @@ function OngletMembres({ tontineId, isOrga }: { tontineId: string; isOrga: boole
 
   const [showInvite, setShowInvite] = useState(false);
   const [email,      setEmail]      = useState('');
-  const [copied,     setCopied]     = useState(false);
   const [accepting,  setAccepting]  = useState<string | null>(null);
-
-  function copyLink() {
-    navigator.clipboard.writeText(window.location.origin + `/rejoindre/${tontineId}`);
-    setCopied(true); setTimeout(() => setCopied(false), 2000);
-  }
 
   async function handleAccepter(membreId: string) {
     setAccepting(membreId);
@@ -179,9 +173,9 @@ function OngletMembres({ tontineId, isOrga }: { tontineId: string; isOrga: boole
         <button onClick={() => setShowInvite(s => !s)} className="btn-primary">
           <RiUserAddLine className="w-4 h-4" /> Inviter par email
         </button>
-        <BoutonInvitationExterne              // ← ajouter ici
+        <BoutonInvitationExterne
           tontineId={tontineId}
-          tontineNom="Nom de la tontine"      // passer le vrai nom
+          tontineNom={tontineNom}
         />
       </div>
     )}
@@ -602,7 +596,7 @@ export function TontineDetailPage() {
       {/* Contenu */}
       <div className="animate-fade-in">
         {onglet === 'apercu'        && <OngletApercu tontine={tontine} />}
-        {onglet === 'membres'       && <OngletMembres tontineId={tontine.id} isOrga={isOrga} />}
+        {onglet === 'membres'       && <OngletMembres tontineId={tontine.id} tontineNom={tontine.nom} isOrga={isOrga} />}
         {onglet === 'cotisations'   && (
           <OngletCotisations
             tontineId={tontine.id}

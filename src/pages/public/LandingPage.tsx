@@ -474,7 +474,7 @@ function Footer() {
           <span className="text-white font-semibold">TontineDigitale</span>
         </div>
         <p className="text-sm text-center">
-          Projet de fin de Licence — Informatique · Cameroun 🇨🇲
+          Prenez en main votre avenir grâce à TontineDigitale · Cameroun 🇨🇲
         </p>
         <div className="flex gap-4 text-sm">
           <Link to="/login" className="hover:text-white transition-colors">Connexion</Link>
