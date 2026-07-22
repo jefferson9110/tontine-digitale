@@ -84,6 +84,7 @@ export function PaiementPage() {
   const [paiement, setPaiement] = useState<{
     cotisationId: string;
     tontineId:    string;
+    tontineNom:   string;
     montant:      number;
     devise:       string;
   } | null>(null);
@@ -235,6 +236,7 @@ export function PaiementPage() {
                         onClick={() => setPaiement({
                           cotisationId: c.id,
                           tontineId:    c.tontine_id,
+                          tontineNom:   tontine?.nom ?? 'Tontine',
                           montant:      montantTotal,
                           devise:       tontine?.devise ?? 'XAF',
                         })}
@@ -303,6 +305,7 @@ export function PaiementPage() {
         <ModalPaiementMobileMoney
           cotisationId={paiement.cotisationId}
           tontineId={paiement.tontineId}
+          tontineNom={paiement.tontineNom}
           montant={paiement.montant}
           devise={paiement.devise}
           type="depot"

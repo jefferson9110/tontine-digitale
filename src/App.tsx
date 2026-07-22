@@ -13,6 +13,7 @@ import { LandingPage }  from './pages/public/LandingPage';
 import { LoginPage }    from './pages/auth/LoginPage';
 import { RegisterPage } from './pages/auth/RegisterPage';
 import { RejoindreViaLienPage } from './pages/public/RejoindreViaLienPage';
+import { VerifierRecuPage } from './pages/public/VerifierRecuPage';
 
 // Pages utilisateur
 import { DashboardPage }     from './pages/membre/DashboardPage';
@@ -61,6 +62,8 @@ export default function App() {
 
               {/* Route d'invitation (accessible sans auth) */}
               <Route path="/invitation/:token" element={<RejoindreViaLienPage />} />
+              {/* Vérification publique d'un reçu de paiement */}
+              <Route path="/verifier/:numero" element={<VerifierRecuPage />} />
               {/* Ancienne route (Système A, abandonnée). Aucun lien valide n'a jamais pu
                   être généré via /rejoindre (bug de génération connu) : redirection simple. */}
               <Route path="/rejoindre/:token" element={<Navigate to="/" replace />} />

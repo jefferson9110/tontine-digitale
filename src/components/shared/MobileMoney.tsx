@@ -1,19 +1,14 @@
-// ════════════════════════════════════════════════
-//  MobileMoney.tsx — Version 2
-//  Vrais logos SVG MTN / Orange / Camtel
-//  + Modal paiement + Historique
-// ════════════════════════════════════════════════
-
 import { useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import {
   RiLoader4Line, RiCheckDoubleLine, RiAlertLine,
   RiSmartphoneLine, RiShieldCheckLine, RiCloseLine,
-  RiMoneyDollarCircleLine,
+  RiMoneyDollarCircleLine, RiFileDownloadLine,
 } from 'react-icons/ri';
 import { supabase }    from '../../lib/supabase';
 import { useAuth }     from '../../contexts/AuthContext';
 import { formatMontant, cn } from '../../lib/utils';
+import { genererRecuPdf } from '../../utils/supabase/genererRecuPdf';
 import toast from 'react-hot-toast';
 
 // ── SVG logos réels ──────────────────────────────
@@ -75,12 +70,6 @@ const OPERATEURS = [
   },
 ];
 
-// ── Référence unique ─────────────────────────────
-function genRef(op: string) {
-  const pfx = op === 'mtn' ? 'MTN' : op === 'orange' ? 'ORG' : 'CAM';
-  return `${pfx}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2,6).toUpperCase()}`;
-}
-
 // ══════════════════════════════════════════════════
 //  Hook useMobileMoney
 // ══════════════════════════════════════════════════
@@ -100,73 +89,44 @@ export function useMobileMoney() {
       type?:         'depot' | 'retrait';
     }) => {
       if (!profile) throw new Error('Non connecté');
-      const reference = genRef(operateur);
 
-      // 1. Créer la transaction
-      const { data: tx, error: te } = await supabase
-        .from('transactions_mobile')
-        .insert({
-          cotisation_id: cotisationId ?? null,
-          user_id:       profile.id,
-          tontine_id:    tontineId,
-          type, operateur,
-          numero_telephone: telephone,
-          montant,
-          statut: 'en_cours',
-          reference,
-        })
-        .select().single();
+      // 1. Initier la transaction côté serveur (RPC — écrit exclusivement côté serveur)
+      const { data: init, error: e1 } = await supabase.rpc('initier_transaction_mobile', {
+        p_cotisation_id: cotisationId ?? null,
+        p_tontine_id:    tontineId,
+        p_montant:       montant,
+        p_operateur:     operateur,
+        p_telephone:     telephone,
+        p_type:          type,
+      });
+      if (e1) throw new Error(e1.message);
+      if (!init.success) throw new Error(init.message ?? "Impossible d'initier la transaction.");
 
-      if (te) throw new Error('Impossible de créer la transaction');
-
-      // 2. Simulation traitement (2s) — remplacer par API MTN/Orange en prod
+      // 2. Délai UX (simulation du traitement réseau côté opérateur).
+      //    À remplacer, en production, par l'attente du webhook de
+      //    l'agrégateur de paiement (CinetPay, PawaPay…).
       await new Promise(r => setTimeout(r, 2000));
-      const succes = Math.random() > 0.05;
 
-      if (!succes) {
-        await supabase.from('transactions_mobile')
-          .update({ statut: 'echec', message_erreur: 'Solde insuffisant ou réseau indisponible' })
-          .eq('id', tx.id);
-        throw new Error('Transaction échouée. Vérifiez votre solde et réessayez.');
-      }
+      // 3. Confirmer/échouer + générer le reçu signé — tout est décidé
+      //    et écrit côté serveur, hors d'atteinte du client.
+      const { data: res, error: e2 } = await supabase.rpc('confirmer_transaction_mobile', {
+        p_transaction_id: init.transaction_id,
+      });
+      if (e2) throw new Error(e2.message);
+      if (!res.success) throw new Error(res.message ?? 'Transaction échouée.');
 
-      // 3. Confirmer
-      await supabase.from('transactions_mobile')
-        .update({ statut: 'confirmee' }).eq('id', tx.id);
-
-      // 4. Valider la cotisation si dépôt
-      if (type === 'depot' && cotisationId) {
-        await supabase.from('cotisations').update({
-          montant_paye:  montant,
-          statut:        'payee',
-          date_paiement: new Date().toISOString(),
-          valide_par:    profile.id,
-          reference,
-        }).eq('id', cotisationId);
-
-        // Notifier l'organisateur
-        const { data: cotis } = await supabase
-          .from('cotisations')
-          .select('tontine:tontines(nom, organisateur_id)')
-          .eq('id', cotisationId).single();
-
-        const t = (cotis as any)?.tontine;
-        if (t?.organisateur_id) {
-          await supabase.from('notifications').insert({
-            user_id: t.organisateur_id,
-            type:    'paiement_recu',
-            titre:   'Cotisation reçue',
-            message: `${profile.prenom} ${profile.nom} a payé sa cotisation via ${operateur.toUpperCase()} (réf: ${reference}).`,
-            lu: false,
-          });
-        }
-      }
-
-      return { reference, montant, operateur, statut: 'confirmee' };
+      return {
+        reference:  res.reference as string,
+        numeroRecu: res.numero_recu as string,
+        montant, operateur, type,
+        statut: 'confirmee',
+      };
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['cotisations'] });
       qc.invalidateQueries({ queryKey: ['mes_cotisations_full'] });
+      qc.invalidateQueries({ queryKey: ['cotisations_impayees'] });
+      qc.invalidateQueries({ queryKey: ['cotisations_payees'] });
       qc.invalidateQueries({ queryKey: ['transactions'] });
       toast.success(`Paiement confirmé ! Réf: ${data.reference}`);
     },
@@ -251,6 +211,7 @@ export function HistoriqueTransactions({ userId }: { userId: string }) {
 interface ModalProps {
   cotisationId?: string;
   tontineId:     string;
+  tontineNom?:   string;
   montant:       number;
   devise?:       string;
   type?:         'depot' | 'retrait';
@@ -259,15 +220,19 @@ interface ModalProps {
 }
 
 export function ModalPaiementMobileMoney({
-  cotisationId, tontineId, montant, devise = 'XAF',
+  cotisationId, tontineId, tontineNom = 'Tontine', montant, devise = 'XAF',
   type = 'depot', onClose, onSuccess,
 }: ModalProps) {
-  const { initierPaiement } = useMobileMoney();
+  const { profile }          = useAuth();
+  const { initierPaiement }  = useMobileMoney();
   const [operateur, setOperateur] = useState('mtn');
   const [telephone, setTelephone] = useState('');
   const [etape,     setEtape]     = useState<'form'|'traitement'|'succes'|'echec'>('form');
-  const [refResult, setRefResult] = useState('');
+  const [refResult,  setRefResult]  = useState('');
+  const [numeroRecu, setNumeroRecu] = useState('');
+  const [telSubmitted, setTelSubmitted] = useState('');
   const [errMsg,    setErrMsg]    = useState('');
+  const [telecharge, setTelecharge] = useState(false);
 
   const teleValid = telephone.replace(/\s/g, '').length >= 9;
   const opCourant = OPERATEURS.find(o => o.id === operateur)!;
@@ -276,16 +241,40 @@ export function ModalPaiementMobileMoney({
     if (!teleValid) return;
     setEtape('traitement');
     try {
+      const telNettoye = telephone.replace(/\s/g, '');
       const result = await initierPaiement.mutateAsync({
         cotisationId, tontineId, montant, operateur,
-        telephone: telephone.replace(/\s/g, ''), type,
+        telephone: telNettoye, type,
       });
       setRefResult(result.reference);
+      setNumeroRecu(result.numeroRecu);
+      setTelSubmitted(telNettoye);
       setEtape('succes');
       onSuccess?.();
     } catch (err: any) {
       setErrMsg(err.message ?? 'Erreur');
       setEtape('echec');
+    }
+  }
+
+  async function handleTelechargerRecu() {
+    if (!numeroRecu || !profile) return;
+    try {
+      await genererRecuPdf({
+        numero_recu:   numeroRecu,
+        reference:     refResult,
+        montant,
+        devise,
+        operateur,
+        type,
+        date:          new Date(),
+        tontine_nom:   tontineNom,
+        membre_nom:    profile.nom,
+        membre_prenom: profile.prenom,
+      });
+      setTelecharge(true);
+    } catch {
+      toast.error('Impossible de générer le reçu PDF.');
     }
   }
 
@@ -402,6 +391,18 @@ export function ModalPaiementMobileMoney({
                 <p className="font-mono text-sm font-bold text-gray-800">{refResult}</p>
               </div>
             </div>
+
+            <button
+              onClick={handleTelechargerRecu}
+              className="btn-outline w-full justify-center"
+            >
+              <RiFileDownloadLine className="w-4 h-4" />
+              {telecharge ? 'Télécharger à nouveau le reçu' : 'Télécharger mon reçu (PDF)'}
+            </button>
+            <p className="text-[11px] text-gray-400 -mt-2">
+              Reçu signé électroniquement, vérifiable via QR code.
+            </p>
+
             <button onClick={onClose} className="btn-primary w-full justify-center">Fermer</button>
           </div>
         )}
