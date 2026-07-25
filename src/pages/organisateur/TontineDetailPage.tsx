@@ -23,6 +23,7 @@ import { BoutonActiverTontine }          from '../../components/shared/BoutonAct
 import { SimulationPaiement,
          type CotisationAValider }        from '../../components/shared/SimulationPaiement';
 import { BoutonInvitationExterne } from '../../components/shared/BoutonInvitationExterne';
+import { genererRapportTontinePdf } from '../../utils/genererRapportTontinePdf';
 
 type Onglet = 'apercu' | 'membres' | 'cotisations' | 'beneficiaires' | 'regles';
 
@@ -324,8 +325,7 @@ function OngletMembres({ tontineId, tontineNom, isOrga }: { tontineId: string; t
 }
 
 // ── Onglet Cotisations ───────────────────────────
-// Seule modification par rapport à l'original :
-// Le bouton "Valider" ouvre SimulationPaiement au lieu d'une modal manuelle
+
 function OngletCotisations({ tontineId, isOrga, devise, cycleActuel }: {
   tontineId:   string;
   isOrga:      boolean;
@@ -337,6 +337,7 @@ function OngletCotisations({ tontineId, isOrga, devise, cycleActuel }: {
   const { data: cotisations = [] } = useCotisations(tontineId, cycleActuel);
 
   // Remplacement de l'état `selected` par `simulation` typé CotisationAValider
+  
   const [simulation, setSimulation] = useState<CotisationAValider | null>(null);
 
   const payees   = cotisations.filter((c: any) => c.statut === 'payee').length;
@@ -506,9 +507,57 @@ export function TontineDetailPage() {
   const { id }      = useParams<{ id: string }>();
   const { profile } = useAuth();
   const [onglet, setOnglet] = useState<Onglet>('apercu');
+  const [genererRapport, setGenererRapport] = useState(false);
 
   const { data: tontine, isLoading } = useTontine(id);
   const isOrga = profile?.role_global === 'organisateur' || profile?.role_global === 'admin';
+
+  async function handleRapport() {
+    if (!tontine) return;
+    setGenererRapport(true);
+    try {
+      // Membres
+      const { data: membresRows } = await supabase
+        .from('membres_tontine')
+        .select('user_id, role, statut, a_beneficie')
+        .eq('tontine_id', tontine.id);
+
+      const ids = (membresRows ?? []).map(m => m.user_id);
+      const { data: profils } = ids.length
+        ? await supabase.from('profiles').select('id, nom, prenom').in('id', ids)
+        : { data: [] as any[] };
+
+      const membres = (membresRows ?? []).map(m => {
+        const p = profils?.find((pr: any) => pr.id === m.user_id);
+        return {
+          nom: p?.nom ?? '—', prenom: p?.prenom ?? '—',
+          role: m.role, statut: m.statut, a_beneficie: m.a_beneficie,
+        };
+      });
+
+      // Cotisations (toutes, pour le score) + cycle actuel (pour les KPIs)
+      const { data: toutesCotisations } = await supabase
+        .from('cotisations')
+        .select('user_id, statut, montant_du, montant_paye, penalite, cycle_numero')
+        .eq('tontine_id', tontine.id);
+
+      const cotisationsParUtilisateur: Record<string, any[]> = {};
+      (toutesCotisations ?? []).forEach((c: any) => {
+        const p = profils?.find((pr: any) => pr.id === c.user_id);
+        const cle = `${p?.prenom ?? '—'}|${p?.nom ?? '—'}`;
+        (cotisationsParUtilisateur[cle] ??= []).push(c);
+      });
+
+      const cotisationsCycle = (toutesCotisations ?? []).filter((c: any) => c.cycle_numero === tontine.cycle_actuel);
+
+      await genererRapportTontinePdf(tontine as any, membres as any, cotisationsCycle, cotisationsParUtilisateur);
+      toast.success('Rapport généré !');
+    } catch (e) {
+      toast.error('Erreur lors de la génération du rapport.');
+    } finally {
+      setGenererRapport(false);
+    }
+  }
 
   const ONGLETS: { key: Onglet; label: string; icon: React.ElementType }[] = [
     { key: 'apercu',        label: 'Aperçu',       icon: RiMoneyDollarCircleLine },
@@ -573,8 +622,10 @@ export function TontineDetailPage() {
                 totalCycles={tontine.total_cycles}
                 isOrga={isOrga}
               />
-              <button className="btn-outline btn-sm">
-                <RiFilePdfLine className="w-4 h-4" /> Rapport
+              <button onClick={handleRapport} disabled={genererRapport} className="btn-outline btn-sm">
+                {genererRapport
+                  ? <RiLoader4Line className="w-4 h-4 animate-spin" />
+                  : <RiFilePdfLine className="w-4 h-4" />} Rapport
               </button>
             </div>
           )}

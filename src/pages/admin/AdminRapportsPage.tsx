@@ -11,6 +11,8 @@ import {
 import { useQuery }    from '@tanstack/react-query';
 import { supabase }   from '../../lib/supabase';
 import { formatMontant, cn } from '../../lib/utils';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import toast from 'react-hot-toast';
 
 function useRapports() {
@@ -18,8 +20,8 @@ function useRapports() {
     queryKey: ['admin_rapports'],
     queryFn: async () => {
       const [tRes, uRes, cRes] = await Promise.all([
-        supabase.from('tontines').select('id, statut'),
-        supabase.from('profiles').select('id, created_at, role_global'),
+        supabase.from('tontines').select('id, nom, statut, montant_cotisation, devise, frequence, nombre_membres_max, created_at, organisateur:profiles!tontines_organisateur_id_fkey(nom, prenom)'),
+        supabase.from('profiles').select('id, nom, prenom, email, role_global, is_active, created_at'),
         supabase.from('cotisations').select('montant_paye, statut, created_at'),
       ]);
 
@@ -72,7 +74,7 @@ function useRapports() {
           };
         });
 
-      return { stats, graphique };
+      return { stats, graphique, tontines, users };
     },
   });
 }
@@ -93,15 +95,151 @@ function ChartTip({ active, payload, label }: any) {
 
 const PIE_COLORS = ['#16a34a', '#f59e0b', '#94a3b8'];
 
+// ── Téléchargement CSV générique ─────────────────
+function telechargerCsv(nomFichier: string, entetes: string[], lignes: (string | number)[][]) {
+  const echapper = (v: string | number) => {
+    const s = String(v ?? '');
+    return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const contenu = [entetes, ...lignes].map(l => l.map(echapper).join(';')).join('\n');
+  // \uFEFF : BOM UTF-8 pour un affichage correct des accents dans Excel
+  const blob = new Blob(['\uFEFF' + contenu], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = nomFichier;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ── En-tête commun des PDF ───────────────────────
+function entetePdf(doc: jsPDF, titre: string) {
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(30, 41, 59);
+  doc.text('TontineDigitale', 14, 18);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text(titre, 14, 25);
+  doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}`, 14, 31);
+  doc.setDrawColor(226, 232, 240);
+  doc.line(14, 35, doc.internal.pageSize.getWidth() - 14, 35);
+  return 42;
+}
+
 export function AdminRapportsPage() {
   const { data, isLoading } = useRapports();
   const [exporting, setExporting] = useState<string | null>(null);
 
-  async function handleExport(key: string) {
+  async function handleExportPdf(key: string) {
+    if (!data) return;
     setExporting(key);
-    await new Promise(r => setTimeout(r, 1000));
-    toast.success(`Rapport ${key} exporté !`);
-    setExporting(null);
+    try {
+      const doc = new jsPDF();
+
+      if (key === 'collecte' || key === 'general') {
+        let y = entetePdf(doc, 'Rapport général — statistiques plateforme');
+        autoTable(doc, {
+          startY: y,
+          head: [['Indicateur', 'Valeur']],
+          body: [
+            ['Volume total collecté', formatMontant(stats?.volume_collecte ?? 0)],
+            ['Utilisateurs inscrits', String(stats?.total_utilisateurs ?? 0)],
+            ['Tontines actives', `${stats?.tontines_actives ?? 0} / ${stats?.total_tontines ?? 0}`],
+            ['Tontines suspendues', String(stats?.tontines_suspendues ?? 0)],
+            ['Tontines terminées', String(stats?.tontines_terminees ?? 0)],
+            ['Taux de participation', `${stats?.taux_participation ?? 0}%`],
+            ['Cotisations en retard', String(stats?.cotisations_retard ?? 0)],
+            ['Nouvelles inscriptions (ce mois)', String(stats?.nouvelles_inscriptions ?? 0)],
+          ],
+          theme: 'striped',
+          headStyles: { fillColor: [22, 101, 52] },
+        });
+        y = (doc as any).lastAutoTable.finalY + 10;
+        doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
+        doc.text('Liste des tontines', 14, y);
+        autoTable(doc, {
+          startY: y + 4,
+          head: [['Nom', 'Statut', 'Cotisation', 'Fréquence', 'Organisateur']],
+          body: data.tontines.map((t: any) => [
+            t.nom, t.statut, formatMontant(t.montant_cotisation, t.devise), t.frequence,
+            t.organisateur ? `${t.organisateur.prenom} ${t.organisateur.nom}` : '—',
+          ]),
+          theme: 'striped',
+          headStyles: { fillColor: [22, 101, 52] },
+          styles: { fontSize: 8 },
+        });
+        doc.save(`rapport-general-${Date.now()}.pdf`);
+      }
+
+      if (key === 'financier') {
+        let y = entetePdf(doc, 'Rapport financier');
+        autoTable(doc, {
+          startY: y,
+          head: [['Mois', 'Collecte', 'Paiements', 'Retards']],
+          body: graphique.map((g: any) => [g.mois, formatMontant(g.collecte), String(g.paiements), String(g.retards)]),
+          theme: 'striped',
+          headStyles: { fillColor: [22, 101, 52] },
+        });
+        doc.save(`rapport-financier-${Date.now()}.pdf`);
+      }
+
+      if (key === 'utilisateurs') {
+        let y = entetePdf(doc, 'Rapport utilisateurs');
+        autoTable(doc, {
+          startY: y,
+          head: [['Nom', 'Email', 'Rôle', 'Statut', 'Inscrit le']],
+          body: data.users.map((u: any) => [
+            `${u.prenom} ${u.nom}`, u.email, u.role_global, u.is_active ? 'Actif' : 'Désactivé',
+            new Date(u.created_at).toLocaleDateString('fr-FR'),
+          ]),
+          theme: 'striped',
+          headStyles: { fillColor: [22, 101, 52] },
+          styles: { fontSize: 8 },
+        });
+        doc.save(`rapport-utilisateurs-${Date.now()}.pdf`);
+      }
+
+      toast.success('Rapport PDF téléchargé !');
+    } catch (e) {
+      toast.error('Erreur lors de la génération du PDF.');
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  function handleExportCsv(key: string) {
+    if (!data) return;
+    setExporting(`${key}-csv`);
+    try {
+      if (key === 'collecte' || key === 'financier') {
+        telechargerCsv(
+          `rapport-financier-${Date.now()}.csv`,
+          ['Mois', 'Collecte', 'Paiements', 'Retards'],
+          graphique.map((g: any) => [g.mois, g.collecte, g.paiements, g.retards])
+        );
+      } else if (key === 'utilisateurs') {
+        telechargerCsv(
+          `rapport-utilisateurs-${Date.now()}.csv`,
+          ['Nom', 'Prénom', 'Email', 'Rôle', 'Statut', 'Inscrit le'],
+          data.users.map((u: any) => [u.nom, u.prenom, u.email, u.role_global, u.is_active ? 'Actif' : 'Désactivé', u.created_at])
+        );
+      } else {
+        telechargerCsv(
+          `rapport-general-${Date.now()}.csv`,
+          ['Nom', 'Statut', 'Cotisation', 'Fréquence', 'Organisateur'],
+          data.tontines.map((t: any) => [
+            t.nom, t.statut, t.montant_cotisation, t.frequence,
+            t.organisateur ? `${t.organisateur.prenom} ${t.organisateur.nom}` : '',
+          ])
+        );
+      }
+      toast.success('Fichier CSV téléchargé !');
+    } catch {
+      toast.error('Erreur lors de la génération du CSV.');
+    } finally {
+      setExporting(null);
+    }
   }
 
   if (isLoading) return (
@@ -155,7 +293,7 @@ export function AdminRapportsPage() {
             <h2 className="font-display font-bold text-gray-900 dark:text-slate-100 text-base">
               Volume collecté mensuel
             </h2>
-            <button onClick={() => handleExport('collecte')} className="btn-outline btn-sm">
+            <button onClick={() => handleExportCsv('collecte')} className="btn-outline btn-sm">
               <RiFileExcelLine className="w-3.5 h-3.5" /> CSV
             </button>
           </div>
@@ -239,13 +377,13 @@ export function AdminRapportsPage() {
               <p className="font-semibold text-gray-800 dark:text-slate-200 text-sm mb-1">{label}</p>
               <p className="text-xs text-gray-400 dark:text-slate-500 mb-4">{desc}</p>
               <div className="flex gap-2">
-                <button onClick={() => handleExport(key)} disabled={!!exporting}
+                <button onClick={() => handleExportPdf(key)} disabled={!!exporting}
                   className="btn-outline btn-sm flex-1 justify-center">
                   {exporting === key
                     ? <RiLoader4Line className="w-3.5 h-3.5 animate-spin" />
                     : <RiFilePdfLine className="w-3.5 h-3.5" />} PDF
                 </button>
-                <button onClick={() => handleExport(`${key}-csv`)} disabled={!!exporting}
+                <button onClick={() => handleExportCsv(key)} disabled={!!exporting}
                   className="btn-outline btn-sm flex-1 justify-center">
                   {exporting === `${key}-csv`
                     ? <RiLoader4Line className="w-3.5 h-3.5 animate-spin" />
